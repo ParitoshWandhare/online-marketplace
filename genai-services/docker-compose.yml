@@ -1,0 +1,9 @@
+version: "3.9"
+
+services:
+  vision-ai-app:
+    image: vision-ai-app:latest   # use the image you built
+    container_name: vision-ai-container
+    ports:
+      - "8000:8000"               # host:container (change if your app uses a different port)
+    restart: unless-stopped

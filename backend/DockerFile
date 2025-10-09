@@ -1,0 +1,22 @@
+# Use an official Node.js runtime as the base image. 'alpine' is a lightweight version.
+FROM node:20-alpine
+
+# Set the working directory within the container.
+WORKDIR /app
+
+# Copy package.json and package-lock.json first to leverage Docker's layer caching.
+COPY package*.json ./
+
+# Install only production dependencies to keep the image size small.
+RUN npm install --only=production
+
+# Copy the rest of your application's source code into the container.
+COPY . .
+
+# Expose the port that your backend application listens on.
+# We'll use 8000 as defined in our main docker-compose.yml.
+EXPOSE 8000
+
+# Define the command to run your application.
+# You might need to change 'src/index.js' to your actual server entry point file (e.g., src/app.js, src/server.js).
+CMD [ "node", "src/index.js" ]

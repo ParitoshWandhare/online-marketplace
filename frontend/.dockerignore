@@ -1,0 +1,18 @@
+# Ignore the node_modules folder. Dependencies are installed inside the container.
+node_modules
+
+# Ignore the build output directory on your local machine.
+dist
+build
+
+# Ignore local environment variables.
+.env
+.env.local
+
+# Ignore version control files.
+.git
+.gitignore
+
+# Ignore npm log files.
+npm-debug.log*
+

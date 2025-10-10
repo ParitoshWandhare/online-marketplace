@@ -1,19 +1,26 @@
 """
-Main entry point for the Gift AI Service.
-----------------------------------------
-This FastAPI app coordinates:
-- LLM interactions (via OpenAI)
-- Hybrid vector retrieval (MongoDB + Qdrant)
-- Gift bundle generation pipeline
+main.py — Gift AI Service
+-------------------------
+This FastAPI microservice powers the AI-driven gift bundle generation feature.
+
+Responsibilities:
+- Extract intent from user queries (occasion, recipient, budget, etc.)
+- Retrieve relevant products from MongoDB + Qdrant hybrid vector store
+- Use LLM to generate creative gift bundle suggestions
+- Validate and return final ranked bundles to the Node backend
 
 Environment variables are loaded from `.env`.
 """
 
 import os
+import traceback
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+from typing import Optional, List
 
-# Load environment variables early
+# --- Load environment variables early ---
 load_dotenv()
 
 # --- Core imports ---
@@ -22,83 +29,163 @@ from core.llm_client import LLMClient
 from core.vector_store import QdrantMongoVectorStore
 
 # --- Initialize FastAPI app ---
-app = FastAPI(title="Gift AI Service", version="1.0.0")
+app = FastAPI(
+    title="Gift AI Service",
+    version="1.0.0",
+    description="GenAI-powered service for intelligent gift recommendations and bundle generation."
+)
 
-# --- Initialize dependencies ---
+# --- Enable CORS for integration with Node.js backend ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # TODO: Restrict to backend domain in production
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-try:
-    #  Initialize LLM client
-    llm_client = LLMClient(api_key=os.getenv("OPENAI_API_KEY"))
+# -------------------------------------------------------------------------
+# 📘 Pydantic Models for Request Validation
+# -------------------------------------------------------------------------
 
-    #  Initialize Vector Store (MongoDB + Qdrant)
-    vector_store = QdrantMongoVectorStore(
-        mongo_uri=os.getenv("MONGO_URI"),
-        mongo_db=os.getenv("MONGO_DB", "marketplaceDB"),
-        mongo_collection=os.getenv("MONGO_COLLECTION", "artworks"),
-        qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"),
-        qdrant_api_key=os.getenv("QDRANT_API_KEY")
-    )
+class BundleRequest(BaseModel):
+    query: str = Field(..., example="Gift for parents for Diwali under 3000")
+    user_id: Optional[str] = Field(None, example="653f12ab9f...")
 
-    #  Initialize Orchestrator
-    orchestrator = GiftOrchestrator(llm_client, vector_store)
+class ArtworkIndexRequest(BaseModel):
+    _id: str = Field(..., example="653f12ab9f...")
+    title: str = Field(..., example="Handmade Clay Lamp")
+    description: str = Field(..., example="Beautiful Diwali diya handcrafted from clay")
+    tags: List[str] = Field(default_factory=list, example=["diwali", "decor", "lamp"])
 
-except Exception as e:
-    raise RuntimeError(f"Initialization failed: {e}")
+# -------------------------------------------------------------------------
+# 🚀 FastAPI Lifecycle Events (for safe dependency initialization)
+# -------------------------------------------------------------------------
 
-# --- API Routes ---
+@app.on_event("startup")
+async def startup_event():
+    """Initialize all dependencies at startup."""
+    try:
+        print("[Startup] Initializing LLM client and vector store...")
+
+        app.state.llm_client = LLMClient(api_key=os.getenv("OPENAI_API_KEY"))
+
+        app.state.vector_store = QdrantMongoVectorStore(
+            MONGO_URI=os.getenv("MONGO_URI"),
+            MONGO_DB=os.getenv("MONGO_DB", "test"),
+            MONGO_COLLECTION=os.getenv("MONGO_COLLECTION", "artworks"),
+            QDRANT_URL=os.getenv("QDRANT_URL", "http://localhost:6333"),
+            QDRANT_API_KEY=os.getenv("QDRANT_API_KEY")
+        )
+
+        app.state.orchestrator = GiftOrchestrator(
+            app.state.llm_client,
+            app.state.vector_store
+        )
+
+        print("[Startup] Gift AI Service initialized successfully ✅")
+
+    except Exception as e:
+        print(f"[Startup Error] {traceback.format_exc()}")
+        raise RuntimeError(f"Failed to initialize service: {str(e)}")
+
+# -------------------------------------------------------------------------
+# 🩺 Health Check
+# -------------------------------------------------------------------------
 
 @app.get("/health")
 async def health_check():
-    """Simple health check endpoint."""
+    """Health check endpoint."""
     return {"status": "ok", "service": "Gift AI", "version": "1.0.0"}
 
+# -------------------------------------------------------------------------
+# 🎁 Generate Gift Bundle
+# -------------------------------------------------------------------------
 
 @app.post("/generate_gift_bundle")
-async def generate_bundle(request: dict):
+async def generate_gift_bundle(request: BundleRequest):
     """
-    Generate a curated gift bundle based on user's query.
+    Generate curated gift bundles based on user's natural language query.
 
-    Request JSON:
+    Example Input:
     {
-        "query": "Gift for parents for Diwali under 3000",
-        "user_id": "optional"
+        "query": "I want a Diwali gift for my parents under 3000"
+    }
+
+    Output:
+    {
+        "success": true,
+        "result": [
+            {
+                "bundle_name": "Diwali Family Delight",
+                "items": [...],
+                "total_price": 2750,
+                "explanation": "Perfect for parents celebrating Diwali together..."
+            },
+            ...
+        ]
     }
     """
-    query = request.get("query")
-    user_id = request.get("user_id")
-
-    if not query:
-        raise HTTPException(status_code=400, detail="Missing required field: 'query'")
+    orchestrator = app.state.orchestrator
 
     try:
-        result = await orchestrator.generate_bundle_pipeline(query, user_id)
+        result = await orchestrator.generate_bundle_pipeline(request.query, request.user_id)
         return {"success": True, "result": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Pipeline error: {str(e)}")
+        print(f"[ERROR] Gift bundle generation failed:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Gift bundle pipeline failed. See logs for details.")
 
+# -------------------------------------------------------------------------
+# 🧩 Index Artwork
+# -------------------------------------------------------------------------
 
 @app.post("/index_artwork")
-async def index_artwork(request: dict):
+async def index_artwork(request: ArtworkIndexRequest):
     """
-    Index a single artwork into Qdrant + MongoDB vector store.
-    Called by Node backend after a new artwork is created.
+    Index a single artwork into the hybrid MongoDB + Qdrant vector store.
 
-    Request JSON:
-    {
-        "_id": "...",
-        "title": "Handmade Lamp",
-        "description": "Clay Diya for Diwali",
-        "tags": ["diwali", "decor"]
-    }
+    Usually called by Node backend after new artwork creation.
     """
+    llm_client = app.state.llm_client
+    vector_store = app.state.vector_store
+
     try:
-        await vector_store.index_artwork(request, llm_client)
-        return {"success": True, "message": "Artwork indexed successfully"}
+        await vector_store.index_artwork(request.dict(), llm_client)
+        return {"success": True, "message": f"Artwork '{request.title}' indexed successfully."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Indexing error: {str(e)}")
+        print(f"[ERROR] Artwork indexing failed:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Artwork indexing failed. See logs for details.")
 
+# -------------------------------------------------------------------------
+# 🔄 Admin Utility: Reindex All Artworks (Optional)
+# -------------------------------------------------------------------------
 
-# --- Run with Uvicorn (only when directly executed) ---
+@app.post("/reindex_all_artworks")
+async def reindex_all_artworks():
+    """
+    Reindex all artworks from MongoDB into Qdrant.
+    Use only for testing or admin purposes.
+    """
+    llm_client = app.state.llm_client
+    vector_store = app.state.vector_store
+
+    try:
+        all_docs = list(vector_store.mongo_collection.find({}))
+        for doc in all_docs:
+            await vector_store.index_artwork(doc, llm_client)
+        return {"success": True, "message": f"Reindexed {len(all_docs)} artworks."}
+    except Exception as e:
+        print(f"[ERROR] Reindex failed:\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail="Reindexing failed. See logs for details.")
+
+# -------------------------------------------------------------------------
+# ▶️ Run Locally with Uvicorn
+# -------------------------------------------------------------------------
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8001)),
+        reload=True
+    )

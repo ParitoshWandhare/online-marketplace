@@ -1,30 +1,47 @@
 """
-services/gift_validation_service.py
------------------------------------
-Validates and ranks retrieved products for relevance and quality.
-
-Owned by: Member B
+Validation service for gift items to ensure data quality.
 """
 
-from typing import Dict, Any, List
+import logging
+from typing import List, Dict, Any, Tuple
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-class GiftValidationService:
-    """Ensures bundle quality and relevance."""
-
-    async def validate_items(self, candidates: List[Dict[str, Any]], intent: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Validate, score, and filter retrieved items.
-
-        Args:
-            candidates (list[dict]): Retrieved items from the store.
-            intent (dict): Extracted user intent.
-
-        Returns:
-            list[dict]: Ranked and validated products.
-        """
-        # TODO: Apply filters like budget, occasion match, diversity
-        # Example scoring logic placeholder
-        for c in candidates:
-            c["validation_score"] = 0.8  # temporary
-        return sorted(candidates, key=lambda x: x["validation_score"], reverse=True)
+def validate_items(items: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+    """
+    Validate items to ensure they have required fields.
+    
+    Args:
+        items: List of items to validate
+        
+    Returns:
+        Tuple containing:
+        - List of valid items
+        - List of invalid items with reasons
+    """
+    required_fields = ['title', 'description', 'category']
+    valid_items = []
+    invalid_items = []
+    
+    for item in items:
+        missing_fields = []
+        
+        # Check required fields
+        for field in required_fields:
+            if field not in item or not item[field]:
+                missing_fields.append(field)
+        
+        if missing_fields:
+            invalid_reason = f"Missing fields: {', '.join(missing_fields)}"
+            invalid_items.append({
+                'item': item,
+                'reason': invalid_reason
+            })
+            logger.warning(f"Invalid item: {invalid_reason}")
+        else:
+            valid_items.append(item)
+    
+    logger.info(f"Validation complete: {len(valid_items)} valid, {len(invalid_items)} invalid items")
+    return valid_items, invalid_items

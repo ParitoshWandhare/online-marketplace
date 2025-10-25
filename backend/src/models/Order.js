@@ -13,17 +13,67 @@ const OrderItemSchema = new Schema(
         type: Schema.Types.ObjectId, 
         ref: "User", 
         required: true 
-    }, // seller tied to each item
-    titleCopy: String,   // snapshot of title
+    },
+    titleCopy: String,
     qty: { 
         type: Number, 
         default: 1, 
         min: 1 
     },
-    unitPrice: Number,   // snapshot of price
+    unitPrice: Number,
     currency: { 
         type: String, 
         default: "INR" 
+    },
+  },
+  { _id: false }
+);
+
+// Address schema for delivery
+const AddressSchema = new Schema(
+  {
+    fullName: { 
+        type: String, 
+        required: true,
+        trim: true 
+    },
+    phone: { 
+        type: String, 
+        required: true,
+        trim: true 
+    },
+    addressLine1: { 
+        type: String, 
+        required: true,
+        trim: true 
+    },
+    addressLine2: { 
+        type: String,
+        trim: true 
+    },
+    city: { 
+        type: String, 
+        required: true,
+        trim: true 
+    },
+    state: { 
+        type: String, 
+        required: true,
+        trim: true 
+    },
+    pincode: { 
+        type: String, 
+        required: true,
+        trim: true 
+    },
+    country: { 
+        type: String, 
+        default: "India",
+        trim: true 
+    },
+    landmark: { 
+        type: String,
+        trim: true 
     },
   },
   { _id: false }
@@ -39,7 +89,7 @@ const OrderSchema = new Schema(
     items: {
         type: [OrderItemSchema], 
         default: [] 
-    }, // each item has its seller
+    },
     total: { 
         type: Number, 
         required: true 
@@ -47,6 +97,12 @@ const OrderSchema = new Schema(
     currency: { 
         type: String, 
         default: "INR" 
+    },
+
+    // Delivery address
+    shippingAddress: {
+        type: AddressSchema,
+        required: true
     },
 
     // Razorpay payment info
@@ -68,11 +124,16 @@ const OrderSchema = new Schema(
       ],
       default: "created",
     },
+
+    // Optional: Track shipment
+    trackingNumber: String,
+    shippedAt: Date,
+    deliveredAt: Date,
   },
   { timestamps: true }
 );
 
 OrderSchema.index({ buyerId: 1 });
-OrderSchema.index({ "items.sellerId": 1 }); // since sellerId is nested now
+OrderSchema.index({ "items.sellerId": 1 });
 
 module.exports = mongoose.model("Order", OrderSchema);

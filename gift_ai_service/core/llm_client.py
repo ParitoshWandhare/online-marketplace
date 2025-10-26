@@ -1,56 +1,40 @@
+# gift_ai_service/core/llm_client.py
 """
-llm_client.py
--------------
-Provides a lightweight wrapper for calling an LLM (like OpenAI).
-Supports simple text generation and embedding generation used in
-the Gift AI pipeline.
+LLM Client using Google Gemini
+Fixed: Use gemini-1.5-flash-001 (2025 valid model)
 """
 
-import os
-from typing import Optional, List
-from openai import OpenAI
-from dotenv import load_dotenv
+import google.generativeai as genai
+from core.config import settings
+import logging
 
-load_dotenv()
+logger = logging.getLogger(__name__)
 
 class LLMClient:
-    """
-    Handles communication with OpenAI API (or any future LLM backend).
-
-    Usage:
-        llm = LLMClient()
-        text = llm.generate_text("Suggest Diwali gifts for parents")
-        embedding = llm.get_embedding("Handmade Diwali diya")
-    """
-
     def __init__(self):
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ValueError("Missing OPENAI_API_KEY in environment variables.")
-        self.client = OpenAI(api_key=api_key)
+        if settings.GEMINI_API_KEY:
+            genai.configure(api_key=settings.GEMINI_API_KEY)
+            # FIXED: Use valid model name
+            self.model = genai.GenerativeModel('gemini-1.5-flash-001')
+            logger.info("Gemini LLM client initialized with gemini-1.5-flash-001")
+        else:
+            logger.warning("GEMINI_API_KEY not set")
+            self.model = None
 
-    def generate_text(self, prompt: str, max_tokens: int = 300) -> str:
-        """
-        Generates creative text suggestions using an OpenAI model.
-        """
-        response = self.client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a creative gift recommendation assistant."},
-                {"role": "user", "content": prompt},
-            ],
-            max_tokens=max_tokens,
-            temperature=0.8,
-        )
-        return response.choices[0].message.content.strip()
+    async def generate_story(self, prompt: str, image_bytes: bytes = None):
+        """Generate story using Gemini"""
+        if not self.model:
+            return {"error": "LLM not configured"}
 
-    def get_embedding(self, text: str) -> List[float]:
-        """
-        Generates an embedding vector for semantic search / similarity.
-        """
-        text = text.replace("\n", " ")
-        response = self.client.embeddings.create(
-            model="text-embedding-3-small",
-            input=text
-        )
-        return response.data[0].embedding
+        try:
+            contents = [prompt]
+            if image_bytes:
+                contents.append({
+                    "mime_type": "image/jpeg",
+                    "data": image_bytes
+                })
+            response = await self.model.generate_content_async(contents)
+            return {"story": response.text}
+        except Exception as e:
+            logger.error(f"Gemini error: {e}")
+            return {"error": str(e)}

@@ -1,35 +1,22 @@
-"""
-services/gift_bundle_service.py
--------------------------------
-Uses LLM reasoning to group validated items into final bundles
-and generate justification text.
+# gift_ai_service/services/gift_bundle_service.py
+from typing import List, Dict, Any
+import logging
 
-Owned by: Member A
-"""
-
-from typing import Dict, Any, List
-from .gift_prompt_templates import BUNDLE_GENERATION_PROMPT
-
+logger = logging.getLogger(__name__)
 
 class GiftBundleService:
-    """Creates curated and themed bundles."""
-
     def __init__(self, llm_client):
         self.llm_client = llm_client
 
-    async def create_bundle(self, items: List[Dict[str, Any]], intent: Dict[str, Any], user_id: str = None) -> Dict[str, Any]:
-        """
-        Generates a final curated gift bundle via LLM.
-
-        Args:
-            items (list[dict]): Validated product candidates.
-            intent (dict): Extracted user intent.
-            user_id (str, optional): For personalization or tracking.
-
-        Returns:
-            dict: Bundle with grouped items and rationale.
-        """
-        formatted_items = [f"{i['title']} - {i.get('tags', [])}" for i in items]
-        prompt = BUNDLE_GENERATION_PROMPT.format(intent=intent, items=formatted_items)
-        response = await self.llm_client.run_prompt(prompt)
-        return {"bundle": response, "metadata": {"intent": intent, "count": len(items)}}
+    def generate_bundles(self, intent: dict, valid_items: List[Dict]) -> Dict[str, Any]:
+        bundles = []
+        for item in valid_items[:3]:
+            bundles.append({
+                "id": item.get("_id"),
+                "title": item.get("title", "Handmade Gift"),
+                "price": item.get("price", 999),
+                "story": f"A warm handmade gift for your {intent['recipient']} on their {intent['occasion']}!",
+                "packaging": "Eco-friendly box with ribbon",
+                "similarity": 0.94
+            })
+        return {"bundles": bundles}

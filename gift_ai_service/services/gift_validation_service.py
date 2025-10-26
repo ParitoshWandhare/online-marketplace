@@ -1,30 +1,36 @@
-"""
-services/gift_validation_service.py
------------------------------------
-Validates and ranks retrieved products for relevance and quality.
+# # gift_ai_service/services/gift_validation_service.py
+# from typing import List, Dict, Any, Tuple
 
-Owned by: Member B
-"""
+# def validate_items(items: List[Dict]) -> Tuple[List[Dict], List[Dict]]:
+#     """
+#     Validate items: price, availability, fraud
+#     """
+#     valid = []
+#     invalid = []
+    
+#     for item in items:
+#         if (item.get("price", 0) > 0 and 
+#             item.get("in_stock", True) and 
+#             item.get("fraud_score", 0) < 0.7):
+#             valid.append(item)
+#         else:
+#             invalid.append(item)
+    
+#     return valid, invalid
+# gift_ai_service/services/gift_validation_service.py
+from typing import List, Dict, Tuple
 
-from typing import Dict, Any, List
-
-
-class GiftValidationService:
-    """Ensures bundle quality and relevance."""
-
-    async def validate_items(self, candidates: List[Dict[str, Any]], intent: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Validate, score, and filter retrieved items.
-
-        Args:
-            candidates (list[dict]): Retrieved items from the store.
-            intent (dict): Extracted user intent.
-
-        Returns:
-            list[dict]: Ranked and validated products.
-        """
-        # TODO: Apply filters like budget, occasion match, diversity
-        # Example scoring logic placeholder
-        for c in candidates:
-            c["validation_score"] = 0.8  # temporary
-        return sorted(candidates, key=lambda x: x["validation_score"], reverse=True)
+def validate_items(items: List[Dict], max_budget: int = 1000) -> Tuple[List[Dict], List[Dict]]:
+    valid = []
+    invalid = []
+    
+    for item in items:
+        price = item.get("price", 0)
+        if (price <= max_budget and 
+            item.get("in_stock", True) and 
+            item.get("fraud_score", 0) < 0.7):
+            valid.append(item)
+        else:
+            invalid.append(item)
+    
+    return valid, invalid

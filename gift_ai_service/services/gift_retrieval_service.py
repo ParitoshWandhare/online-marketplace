@@ -1,31 +1,33 @@
+# gift_ai_service/services/gift_retrieval_service.py
 """
-services/gift_retrieval_service.py
-----------------------------------
-Handles semantic and metadata-based product retrieval from MongoDB + Qdrant.
-
-Owned by: Member B
+Member C: Retrieve similar gifts from Qdrant
 """
 
-from typing import Dict, Any, List
+from core.vector_store import VectorStore
+from typing import List, Dict, Any
+import logging
 
+logger = logging.getLogger(__name__)
 
-class GiftRetrievalService:
-    """Retrieves matching gift items based on extracted intent."""
+async def retrieve_similar(
+    intent: Dict[str, Any],
+    top_k: int = 5
+) -> List[Dict[str, Any]]:
+    """
+    Semantic search using intent as query.
+    """
+    vector_store = VectorStore()
+    await vector_store.connect()
 
-    def __init__(self, vector_store):
-        self.vector_store = vector_store
-
-    async def retrieve_items(self, intent: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Retrieves top candidate products from the hybrid vector store.
-
-        Args:
-            intent (dict): Structured intent (occasion, recipient, budget, etc.)
-
-        Returns:
-            list[dict]: Candidate artworks with metadata and similarity scores.
-        """
-        query = f"{intent.get('occasion', '')} gift for {intent.get('recipient', '')}"
-        results = await self.vector_store.hybrid_search(query)
-        # TODO: Apply budget and tag filters
+    query_text = f"{intent['occasion']} gift for {intent['recipient']} under {intent['budget_inr']} INR, {intent['sentiment']} style"
+    
+    try:
+        results = await vector_store.search_related_items(
+            text=query_text,
+            limit=top_k
+        )
+        logger.info(f"Retrieved {len(results)} similar gifts")
         return results
+    except Exception as e:
+        logger.error(f"Retrieval failed: {e}")
+        return []

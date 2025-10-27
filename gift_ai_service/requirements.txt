@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+openai
+pymongo
+motor
+python-dotenv
+pytest
+httpx
+qdrant-client

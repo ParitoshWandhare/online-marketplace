@@ -5,6 +5,34 @@ Gift AI Service - Unified API Gateway
 Complete integration of all microservices in one file
 """
 
+# ========================================================================
+# CRITICAL: Load .env FIRST before any other imports
+# ========================================================================
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Get absolute path to .env file
+env_path = Path(__file__).parent / ".env"
+print(f"🔍 Looking for .env at: {env_path}")
+print(f"   Exists: {env_path.exists()}")
+
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path, override=True)
+    print("✅ .env loaded")
+    
+    # Verify API key immediately
+    api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+    if api_key:
+        print(f"✅ API Key found: {api_key[:15]}...")
+    else:
+        print("❌ API Key NOT found after loading .env!")
+else:
+    print(f"❌ .env file not found at: {env_path}")
+
+# ========================================================================
+# NOW import everything else
+# ========================================================================
 import logging
 import traceback
 from typing import Dict, Any, List, Optional
@@ -12,6 +40,7 @@ from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ConfigDict
+from contextlib import asynccontextmanager
 
 from core.orchestrator import GiftOrchestrator
 from core.config import settings
@@ -58,39 +87,23 @@ class ArtworkIndexRequest(BaseModel):
     price: float
     tags: Optional[List[str]] = []
 
-# ========================================================================
-# FASTAPI APP
-# ========================================================================
-app = FastAPI(
-    title="Gift AI Service - Unified",
-    description="Complete GenAI gift recommendation system",
-    version="2.0.0",
-    docs_url="/docs",
-    redoc_url="/redoc"
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 # Global orchestrator
 orchestrator: Optional[GiftOrchestrator] = None
 
 # ========================================================================
-# LIFECYCLE
+# LIFECYCLE MANAGEMENT (Modern FastAPI way)
 # ========================================================================
-@app.on_event("startup")
-async def startup_event():
-    """Initialize on startup"""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan management"""
     global orchestrator
     
+    # Startup
     logger.info("🚀 Gift AI Service starting...")
     logger.info(f"📦 MongoDB: {settings.DATABASE_NAME}.{settings.COLLECTION_NAME}")
     logger.info(f"🔍 Qdrant: {settings.QDRANT_URL}")
     logger.info(f"🤖 LLM: {settings.LLM_MODEL}")
+    logger.info(f"🔑 API Key: {'✅ Configured' if settings.GEMINI_API_KEY else '❌ MISSING'}")
     
     try:
         orchestrator = GiftOrchestrator()
@@ -99,10 +112,10 @@ async def startup_event():
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")
         traceback.print_exc()
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
+    
+    yield  # Application runs here
+    
+    # Shutdown
     logger.info("🛑 Shutting down...")
     if orchestrator:
         try:
@@ -110,6 +123,25 @@ async def shutdown_event():
             logger.info("✅ Connections closed")
         except Exception as e:
             logger.warning(f"⚠️ Shutdown warning: {e}")
+
+# ========================================================================
+# FASTAPI APP
+# ========================================================================
+app = FastAPI(
+    title="Gift AI Service - Unified",
+    description="Complete GenAI gift recommendation system",
+    version="2.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    lifespan=lifespan  # Use modern lifespan instead of on_event
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ========================================================================
 # ENDPOINTS
@@ -124,9 +156,9 @@ async def health_check():
         "version": "2.0.0",
         "components": {
             "orchestrator": orchestrator is not None,
-            "mongodb": settings.MONGODB_URL is not None,
-            "qdrant": settings.QDRANT_URL is not None,
-            "llm": settings.GEMINI_API_KEY is not None
+            "mongodb": settings.MONGODB_URL is not None and settings.MONGODB_URL != "",
+            "qdrant": settings.QDRANT_URL is not None and settings.QDRANT_URL != "",
+            "gemini_api_key": settings.GEMINI_API_KEY is not None and settings.GEMINI_API_KEY != ""
         }
     }
 

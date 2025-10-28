@@ -2,6 +2,7 @@
 const Artwork = require("../models/Artwork");
 const mongoose = require("mongoose");
 const { cloudinary } = require("../config/cloudinary");
+const giftAIService = require("../services/giftAIService");
 
 // ------------------ CREATE ARTWORK ------------------
 exports.createArtwork = async (req, res) => {
@@ -14,12 +15,14 @@ exports.createArtwork = async (req, res) => {
         message: "Title and price are required",
       });
     }
+
     let media = (req.files || []).map((file) => ({
       url: file.path,
       type: file.mimetype.startsWith("video") ? "video" : "image",
       sizeBytes: file.size,
       storageKey: file.filename,
     }));
+
     const artwork = await Artwork.create({
       artistId: req.user.id,
       title,
@@ -28,9 +31,21 @@ exports.createArtwork = async (req, res) => {
       currency: currency || "INR",
       quantity: quantity || 1,
       status: status || "draft",
-      tags: tags || [], // save tags
+      tags: tags || [],
       media,
     });
+
+    // 🎁 AUTO-INDEX: Index artwork in AI vector store if published
+    if (artwork.status === "published") {
+      try {
+        await giftAIService.indexArtwork(artwork);
+        console.log(`✅ Artwork ${artwork._id} indexed in AI vector store`);
+      } catch (error) {
+        console.error(`⚠️ Failed to index artwork ${artwork._id}:`, error.message);
+        // Don't fail the request if indexing fails
+      }
+    }
+
     res.status(201).json({
       success: true,
       message: "Artwork posted successfully",
@@ -41,6 +56,82 @@ exports.createArtwork = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Internal server error while creating artwork",
+      error: err.message,
+    });
+  }
+};
+
+// ------------------ UPDATE ARTWORK ------------------
+exports.updateArtwork = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, description, price, currency, quantity, status, tags } = req.body;
+
+    const artwork = await Artwork.findById(id);
+    if (!artwork) {
+      return res.status(404).json({ 
+        success: false, 
+        message: "Artwork not found" 
+      });
+    }
+
+    if (artwork.artistId.toString() !== req.user.id) {
+      return res.status(403).json({ 
+        success: false, 
+        message: "Unauthorized" 
+      });
+    }
+
+    if (artwork.status !== "draft") {
+      return res.status(400).json({
+        success: false,
+        message: "Only artworks in draft state can be edited",
+      });
+    }
+
+    // Update fields
+    if (title) artwork.title = title;
+    if (description) artwork.description = description;
+    if (price) artwork.price = price;
+    if (currency) artwork.currency = currency;
+    if (quantity) artwork.quantity = quantity;
+    if (tags) artwork.tags = tags;
+    
+    // Track status change
+    const wasPublished = artwork.status === "published";
+    if (status) artwork.status = status;
+    const isNowPublished = artwork.status === "published";
+
+    await artwork.save();
+
+    // 🎁 AUTO-INDEX: Index if newly published or re-index if already published
+    if (isNowPublished && !wasPublished) {
+      try {
+        await giftAIService.indexArtwork(artwork);
+        console.log(`✅ Artwork ${artwork._id} indexed in AI vector store`);
+      } catch (error) {
+        console.error(`⚠️ Failed to index artwork ${artwork._id}:`, error.message);
+      }
+    } else if (isNowPublished && wasPublished) {
+      // Re-index if already published (content changed)
+      try {
+        await giftAIService.indexArtwork(artwork);
+        console.log(`♻️ Artwork ${artwork._id} re-indexed in AI vector store`);
+      } catch (error) {
+        console.error(`⚠️ Failed to re-index artwork ${artwork._id}:`, error.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "Artwork updated successfully",
+      artwork,
+    });
+  } catch (err) {
+    console.error("Error updating artwork:", err);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error while updating artwork",
       error: err.message,
     });
   }
@@ -115,6 +206,9 @@ exports.deleteArtwork = async (req, res) => {
 
     await artwork.deleteOne();
 
+    // Note: Vector store cleanup would require additional API endpoint
+    // For now, deleted items will simply not be returned in searches
+
     res.json({
       success: true,
       message: "Artwork deleted successfully",
@@ -149,50 +243,11 @@ exports.myArtworks = async (req, res) => {
   }
 };
 
-// ------------------ UPDATE ARTWORK ------------------
-exports.updateArtwork = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { title, description, price, currency, quantity, status, tags } = req.body; // include tags
-    const artwork = await Artwork.findById(id);
-    if (!artwork) return res.status(404).json({ success: false, message: "Artwork not found" });
-    if (artwork.artistId.toString() !== req.user.id) {
-      return res.status(403).json({ success: false, message: "Unauthorized" });
-    }
-    if (artwork.status !== "draft") {
-      return res.status(400).json({
-        success: false,
-        message: "Only artworks in draft state can be edited",
-      });
-    }
-    if (title) artwork.title = title;
-    if (description) artwork.description = description;
-    if (price) artwork.price = price;
-    if (currency) artwork.currency = currency;
-    if (quantity) artwork.quantity = quantity;
-    if (status) artwork.status = status;
-    if (tags) artwork.tags = tags; // update tags
-    await artwork.save();
-    res.json({
-      success: true,
-      message: "Artwork updated successfully",
-      artwork,
-    });
-  } catch (err) {
-    console.error("Error updating artwork:", err);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error while updating artwork",
-      error: err.message,
-    });
-  }
-};
-
 // ------------------ RESTOCK ARTWORK ------------------
 exports.restockArtwork = async (req, res) => {
   try {
-    const { id } = req.params; // artwork ID
-    const { quantity } = req.body; // new quantity to add
+    const { id } = req.params;
+    const { quantity } = req.body;
 
     if (!quantity || quantity <= 0) {
       return res.status(400).json({
@@ -207,17 +262,22 @@ exports.restockArtwork = async (req, res) => {
       return res.status(404).json({ success: false, message: "Artwork not found" });
     }
 
-    // Only the seller/artist can restock
     if (artwork.artistId.toString() !== req.user.id) {
       return res.status(403).json({ success: false, message: "Unauthorized" });
     }
 
-    // increase quantity
     artwork.quantity += Number(quantity);
 
-    // if previously out_of_stock or removed, publish it again
     if (artwork.status === "out_of_stock" || artwork.status === "removed") {
       artwork.status = "published";
+      
+      // 🎁 AUTO-INDEX: Re-index when restocking
+      try {
+        await giftAIService.indexArtwork(artwork);
+        console.log(`♻️ Artwork ${artwork._id} re-indexed after restocking`);
+      } catch (error) {
+        console.error(`⚠️ Failed to re-index artwork ${artwork._id}:`, error.message);
+      }
     }
 
     await artwork.save();

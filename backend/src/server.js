@@ -2,7 +2,6 @@ const express = require("express");
 const dotenv = require("dotenv");
 const cookieParser = require("cookie-parser");
 const cors = require("cors");
-// const fileUpload = require("express-fileupload");
 
 // Configs
 const database = require("./config/database");
@@ -16,7 +15,7 @@ const orderRoutes = require("./routes/orderRoutes");
 const likeRoutes = require("./routes/likeRoutes");
 const cartRoutes = require("./routes/cartRoutes");
 const visionRoutes = require("./routes/visionRoutes");
-
+const giftAIRoutes = require("./routes/giftAIRoutes");
 
 // Initialize app
 dotenv.config();
@@ -36,12 +35,6 @@ app.use(
     credentials: true,
   })
 );
-// app.use(
-//   fileUpload({
-//     useTempFiles: true,
-//     tempFileDir: "/tmp/",
-//   })
-// );
 
 // ------------------- Routes -------------------
 app.use("/api/v1/auth", authRoutes);
@@ -51,6 +44,7 @@ app.use("/api/v1/order", orderRoutes);
 app.use("/api/v1/like", likeRoutes);
 app.use("/api/v1/cart", cartRoutes);
 app.use("/api/v1/vision", visionRoutes);
+app.use("/api/v1/gift-ai", giftAIRoutes);
 
 // ------------------- Health Check -------------------
 app.get("/", (req, res) => {
@@ -62,5 +56,8 @@ app.get("/", (req, res) => {
 
 // ------------------- Start Server -------------------
 app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📦 Backend API: http://localhost:${PORT}`);
+  console.log(`🎁 Gift AI Service: ${process.env.GIFT_AI_SERVICE_URL || "http://localhost:8001"}`);
+  console.log(`👁️ Vision AI Service: ${process.env.VISION_AI_SERVICE_URL || "http://localhost:8004"}`);
 });

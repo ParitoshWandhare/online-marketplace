@@ -1,9 +1,28 @@
-fastapi
-uvicorn
-openai
-pymongo
-motor
-python-dotenv
-pytest
-httpx
-qdrant-client
+# Core FastAPI dependencies
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Pydantic for data validation
+pydantic==2.5.0
+pydantic-settings==2.1.0
+
+# Database clients
+motor==3.3.2              # Async MongoDB
+pymongo==4.6.0            # Sync MongoDB (for environment service)
+qdrant-client==1.7.1      # Vector database
+
+# LLM APIs
+google-generativeai==0.3.1  # Gemini API
+
+# HTTP client for inter-service calls
+httpx==0.25.2
+requests==2.31.0
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Utilities
+numpy==1.26.2             # For vector operations
+typing-extensions==4.8.0  # For better type hints
+

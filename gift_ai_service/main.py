@@ -1,191 +1,335 @@
+# gift_ai_service/main.py
 """
-main.py — Gift AI Service
--------------------------
-This FastAPI microservice powers the AI-driven gift bundle generation feature.
-
-Responsibilities:
-- Extract intent from user queries (occasion, recipient, budget, etc.)
-- Retrieve relevant products from MongoDB + Qdrant hybrid vector store
-- Use LLM to generate creative gift bundle suggestions
-- Validate and return final ranked bundles to the Node backend
-
-Environment variables are loaded from `.env`.
+Gift AI Service - Unified API Gateway
+=====================================
+Complete integration of all microservices in one file
 """
 
-import os
+import logging
 import traceback
-from fastapi import FastAPI, HTTPException
+from typing import Dict, Any, List, Optional
+
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_dotenv
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from pydantic import BaseModel, Field, ConfigDict
 
-# --- Load environment variables early ---
-load_dotenv()
-
-# --- Core imports ---
 from core.orchestrator import GiftOrchestrator
-from core.llm_client import LLMClient
-from core.vector_store import QdrantMongoVectorStore
+from core.config import settings
 
-# --- Initialize FastAPI app ---
+# Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+)
+logger = logging.getLogger("gift_ai.main")
+
+# ========================================================================
+# PYDANTIC MODELS
+# ========================================================================
+class GiftBundle(BaseModel):
+    """Gift bundle model"""
+    bundle_name: str
+    description: str
+    items: List[Dict[str, Any]]
+    total_price: Optional[float] = None
+
+class ImageBundleResponse(BaseModel):
+    """Image upload response"""
+    bundle_id: str
+    vision: Dict[str, Any]
+    intent: Dict[str, Any]
+    bundles: List[Dict[str, Any]]
+    metadata: Dict[str, Any]
+    error: Optional[str] = None
+
+class TextSearchResponse(BaseModel):
+    """Text search response"""
+    query: str
+    bundles: List[Dict[str, Any]]
+    metadata: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+class ArtworkIndexRequest(BaseModel):
+    """Single artwork index request"""
+    mongo_id: str
+    title: str
+    description: str
+    category: Optional[str] = "General"
+    price: float
+    tags: Optional[List[str]] = []
+
+# ========================================================================
+# FASTAPI APP
+# ========================================================================
 app = FastAPI(
-    title="Gift AI Service",
-    version="1.0.0",
-    description="GenAI-powered service for intelligent gift recommendations and bundle generation."
+    title="Gift AI Service - Unified",
+    description="Complete GenAI gift recommendation system",
+    version="2.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
-# --- Enable CORS for integration with Node.js backend ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # TODO: Restrict to backend domain in production
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -------------------------------------------------------------------------
-# 📘 Pydantic Models for Request Validation
-# -------------------------------------------------------------------------
+# Global orchestrator
+orchestrator: Optional[GiftOrchestrator] = None
 
-class BundleRequest(BaseModel):
-    query: str = Field(..., example="Gift for parents for Diwali under 3000")
-    user_id: Optional[str] = Field(None, example="653f12ab9f...")
-
-class ArtworkIndexRequest(BaseModel):
-    _id: str = Field(..., example="653f12ab9f...")
-    title: str = Field(..., example="Handmade Clay Lamp")
-    description: str = Field(..., example="Beautiful Diwali diya handcrafted from clay")
-    tags: List[str] = Field(default_factory=list, example=["diwali", "decor", "lamp"])
-
-# -------------------------------------------------------------------------
-# 🚀 FastAPI Lifecycle Events (for safe dependency initialization)
-# -------------------------------------------------------------------------
-
+# ========================================================================
+# LIFECYCLE
+# ========================================================================
 @app.on_event("startup")
 async def startup_event():
-    """Initialize all dependencies at startup."""
+    """Initialize on startup"""
+    global orchestrator
+    
+    logger.info("🚀 Gift AI Service starting...")
+    logger.info(f"📦 MongoDB: {settings.DATABASE_NAME}.{settings.COLLECTION_NAME}")
+    logger.info(f"🔍 Qdrant: {settings.QDRANT_URL}")
+    logger.info(f"🤖 LLM: {settings.LLM_MODEL}")
+    
     try:
-        print("[Startup] Initializing LLM client and vector store...")
-
-        app.state.llm_client = LLMClient(api_key=os.getenv("OPENAI_API_KEY"))
-
-        app.state.vector_store = QdrantMongoVectorStore(
-            MONGO_URI=os.getenv("MONGO_URI"),
-            MONGO_DB=os.getenv("MONGO_DB", "test"),
-            MONGO_COLLECTION=os.getenv("MONGO_COLLECTION", "artworks"),
-            QDRANT_URL=os.getenv("QDRANT_URL", "http://localhost:6333"),
-            QDRANT_API_KEY=os.getenv("QDRANT_API_KEY")
-        )
-
-        app.state.orchestrator = GiftOrchestrator(
-            app.state.llm_client,
-            app.state.vector_store
-        )
-
-        print("[Startup] Gift AI Service initialized successfully ✅")
-
+        orchestrator = GiftOrchestrator()
+        await orchestrator.vector_store.connect()
+        logger.info("✅ Service initialized")
     except Exception as e:
-        print(f"[Startup Error] {traceback.format_exc()}")
-        raise RuntimeError(f"Failed to initialize service: {str(e)}")
+        logger.error(f"❌ Startup failed: {e}")
+        traceback.print_exc()
 
-# -------------------------------------------------------------------------
-# 🩺 Health Check
-# -------------------------------------------------------------------------
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    logger.info("🛑 Shutting down...")
+    if orchestrator:
+        try:
+            await orchestrator.vector_store.close()
+            logger.info("✅ Connections closed")
+        except Exception as e:
+            logger.warning(f"⚠️ Shutdown warning: {e}")
+
+# ========================================================================
+# ENDPOINTS
+# ========================================================================
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "ok", "service": "Gift AI", "version": "1.0.0"}
-
-# -------------------------------------------------------------------------
-# 🎁 Generate Gift Bundle
-# -------------------------------------------------------------------------
-
-@app.post("/generate_gift_bundle")
-async def generate_gift_bundle(request: BundleRequest):
-    """
-    Generate curated gift bundles based on user's natural language query.
-
-    Example Input:
-    {
-        "query": "I want a Diwali gift for my parents under 3000"
+    """Health check"""
+    return {
+        "status": "healthy",
+        "service": "gift-ai-unified",
+        "version": "2.0.0",
+        "components": {
+            "orchestrator": orchestrator is not None,
+            "mongodb": settings.MONGODB_URL is not None,
+            "qdrant": settings.QDRANT_URL is not None,
+            "llm": settings.GEMINI_API_KEY is not None
+        }
     }
 
-    Output:
-    {
-        "success": true,
-        "result": [
-            {
-                "bundle_name": "Diwali Family Delight",
-                "items": [...],
-                "total_price": 2750,
-                "explanation": "Perfect for parents celebrating Diwali together..."
-            },
-            ...
-        ]
-    }
+@app.post("/generate_gift_bundle", response_model=ImageBundleResponse)
+async def generate_gift_bundle(
+    image: UploadFile = File(..., description="Image (JPEG/PNG, max 5MB)")
+) -> ImageBundleResponse:
     """
-    orchestrator = app.state.orchestrator
-
+    🎨 Image → Gift Bundle Pipeline
+    
+    Flow: Image → Vision AI → Intent → Retrieval → Validation → Bundle
+    """
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    if not image.filename or not image.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Invalid image file")
+    
     try:
-        result = await orchestrator.generate_bundle_pipeline(request.query, request.user_id)
-        return {"success": True, "result": result}
+        image_bytes = await image.read()
+        if len(image_bytes) > 5 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="Image too large (max 5MB)")
+        
+        logger.info(f"📸 Processing: {image.filename}")
+        result = await orchestrator.generate_bundle(image_bytes, image.filename)
+        logger.info(f"✅ Bundle generated: {result['bundle_id']}")
+        return result
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[ERROR] Gift bundle generation failed:\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail="Gift bundle pipeline failed. See logs for details.")
+        logger.error(f"❌ Failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
-# -------------------------------------------------------------------------
-# 🧩 Index Artwork
-# -------------------------------------------------------------------------
+@app.post("/search_similar_gifts", response_model=TextSearchResponse)
+async def search_similar_gifts(
+    query: str = Query(..., description="Search query", min_length=1),
+    limit: int = Query(10, ge=1, le=50)
+) -> TextSearchResponse:
+    """
+    🔍 Text Search → Gift Bundle
+    
+    Flow: Query → Embedding → Vector Search → Validation → Bundle
+    """
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    if not query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+    
+    try:
+        logger.info(f"🔍 Searching: '{query}'")
+        result = await orchestrator.process_gift_query(query, limit)
+        logger.info(f"✅ Found {len(result.get('bundles', []))} bundles")
+        return result
+    except Exception as e:
+        logger.error(f"❌ Search failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/refresh_vector_store")
+async def refresh_vector_store():
+    """
+    🔄 Refresh Vector Store (Admin)
+    
+    Syncs MongoDB items to Qdrant with embeddings
+    """
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
+    try:
+        logger.info("🔄 Starting refresh...")
+        result = await orchestrator.refresh_vector_store()
+        
+        if result.get("success"):
+            logger.info("✅ Refresh completed")
+            return {
+                "success": True,
+                "message": result.get("message", "Refreshed successfully"),
+                "items_count": result.get("items_count", 0),
+                "collection": settings.COLLECTION_NAME
+            }
+        else:
+            error_msg = result.get("error", "Unknown error")
+            step = result.get("step", "unknown")
+            logger.error(f"❌ Refresh failed at step '{step}': {error_msg}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Refresh failed at {step}: {error_msg}"
+            )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Refresh error: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/index_artwork")
 async def index_artwork(request: ArtworkIndexRequest):
     """
-    Index a single artwork into the hybrid MongoDB + Qdrant vector store.
-
-    Usually called by Node backend after new artwork creation.
+    📦 Index Single Artwork
+    
+    Adds item to vector store immediately
     """
-    llm_client = app.state.llm_client
-    vector_store = app.state.vector_store
-
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
     try:
-        await vector_store.index_artwork(request.dict(), llm_client)
-        return {"success": True, "message": f"Artwork '{request.title}' indexed successfully."}
+        item_dict = request.model_dump()
+        text = f"{item_dict['title']} {item_dict['description']}"
+        
+        # Generate embedding
+        embedding = orchestrator.vector_store.generate_embedding(text)
+        if not embedding:
+            raise HTTPException(status_code=500, detail="Embedding generation failed")
+        
+        # Pad to 768-dim
+        if len(embedding) > 768:
+            embedding = embedding[:768]
+        elif len(embedding) < 768:
+            embedding.extend([0.0] * (768 - len(embedding)))
+        
+        # Upload to Qdrant
+        from qdrant_client.http.models import PointStruct
+        
+        point = PointStruct(
+            id=abs(hash(item_dict['mongo_id'])) % (10 ** 8),
+            vector=embedding,
+            payload={
+                'title': item_dict['title'],
+                'description': item_dict['description'],
+                'category': item_dict.get('category', 'General'),
+                'price': item_dict['price'],
+                'mongo_id': item_dict['mongo_id']
+            }
+        )
+        
+        orchestrator.vector_store.qdrant_client.upsert(
+            collection_name=settings.COLLECTION_NAME,
+            points=[point]
+        )
+        
+        logger.info(f"✅ Indexed: {item_dict['title']}")
+        return {
+            "success": True,
+            "message": f"Indexed '{item_dict['title']}'",
+            "item_id": item_dict['mongo_id']
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[ERROR] Artwork indexing failed:\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail="Artwork indexing failed. See logs for details.")
+        logger.error(f"❌ Indexing failed: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
-# -------------------------------------------------------------------------
-# 🔄 Admin Utility: Reindex All Artworks (Optional)
-# -------------------------------------------------------------------------
-
-@app.post("/reindex_all_artworks")
-async def reindex_all_artworks():
+@app.get("/vector_store_info")
+async def vector_store_info():
     """
-    Reindex all artworks from MongoDB into Qdrant.
-    Use only for testing or admin purposes.
+    📊 Get Vector Store Info
     """
-    llm_client = app.state.llm_client
-    vector_store = app.state.vector_store
-
+    if not orchestrator:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+    
     try:
-        all_docs = list(vector_store.mongo_collection.find({}))
-        for doc in all_docs:
-            await vector_store.index_artwork(doc, llm_client)
-        return {"success": True, "message": f"Reindexed {len(all_docs)} artworks."}
+        if orchestrator.vector_store.qdrant_client:
+            collections = orchestrator.vector_store.qdrant_client.get_collections()
+            collection_names = [col.name for col in collections.collections]
+            
+            collection_info = None
+            if settings.COLLECTION_NAME in collection_names:
+                collection_info = orchestrator.vector_store.qdrant_client.get_collection(
+                    settings.COLLECTION_NAME
+                )
+            
+            return {
+                "connected": True,
+                "qdrant_url": settings.QDRANT_URL,
+                "mongodb_db": settings.DATABASE_NAME,
+                "qdrant_collection": settings.COLLECTION_NAME,
+                "available_collections": collection_names,
+                "collection_info": {
+                    "vectors_count": collection_info.vectors_count if collection_info else 0,
+                    "points_count": collection_info.points_count if collection_info else 0
+                } if collection_info else None
+            }
+        else:
+            return {"connected": False, "error": "Qdrant not initialized"}
     except Exception as e:
-        print(f"[ERROR] Reindex failed:\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail="Reindexing failed. See logs for details.")
+        logger.error(f"❌ Info fetch failed: {e}")
+        return {"connected": False, "error": str(e)}
 
-# -------------------------------------------------------------------------
-# ▶️ Run Locally with Uvicorn
-# -------------------------------------------------------------------------
-
+# ========================================================================
+# RUN
+# ========================================================================
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 8001)),
-        reload=True
+        port=settings.PORT,
+        reload=True,
+        log_level="info"
     )

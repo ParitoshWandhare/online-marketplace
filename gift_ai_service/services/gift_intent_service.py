@@ -1,39 +1,62 @@
+# gift_ai_service/services/gift_intent_service.py
 """
-services/gift_intent_service.py
--------------------------------
-Extracts structured intent from natural language user queries
-using LLM prompts.
-
-Owned by: Member A
+Member B: Extract gift intent from image + vision analysis
 """
 
+from core.llm_client import LLMClient
 from typing import Dict, Any
-from .gift_prompt_templates import INTENT_EXTRACTION_PROMPT
+import logging
 
+logger = logging.getLogger(__name__)
 
-class GiftIntentService:
-    """Detects gift intent such as recipient, occasion, and budget."""
-
-    def __init__(self, llm_client):
-        self.llm_client = llm_client
-
-    async def extract_intent(self, query: str) -> Dict[str, Any]:
-        """
-        Extract intent using LLM.
-
-        Args:
-            query (str): Raw user input (e.g. "Gift for sister under ₹2000")
-
-        Returns:
-            dict: Parsed structure like:
-            {
-                "occasion": "birthday",
-                "recipient": "sister",
-                "budget": 2000,
-                "preferences": ["handmade", "cute"]
-            }
-        """
-        prompt = INTENT_EXTRACTION_PROMPT.format(query=query)
-        response = await self.llm_client.run_prompt(prompt)
-        # TODO: parse response to JSON or dict
-        return {"intent_raw": response}
+async def extract_intent(
+    image_bytes: bytes,
+    vision_analysis: Dict[str, Any],
+    user_prompt: str = None
+) -> Dict[str, Any]:
+    """
+    Extract gift intent using Gemini + vision clues.
+    
+    Returns:
+        {
+            "occasion": "birthday",
+            "recipient": "sister",
+            "budget_inr": 1500,
+            "sentiment": "warm",
+            "interests": ["handmade", "pottery"]
+        }
+    """
+    llm = LLMClient()
+    
+    prompt = f"""
+    Analyze this image and vision data to extract gift intent.
+    
+    Vision: {vision_analysis}
+    User: {user_prompt or "No prompt"}
+    
+    Return JSON:
+    {{
+        "occasion": "...",
+        "recipient": "...",
+        "budget_inr": 1500,
+        "sentiment": "warm|playful|elegant",
+        "interests": ["...", "..."]
+    }}
+    """
+    
+    try:
+        result = await llm.generate_story(prompt, image_bytes)
+        # Parse JSON from result['story']
+        import json
+        data = json.loads(result['story'])
+        logger.info(f"Intent extracted: {data}")
+        return data
+    except Exception as e:
+        logger.error(f"Intent extraction failed: {e}")
+        return {
+            "occasion": "birthday",
+            "recipient": "friend",
+            "budget_inr": 1000,
+            "sentiment": "warm",
+            "interests": ["handmade"]
+        }

@@ -31,8 +31,10 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "*",
-    credentials: true,
+    origin: process.env.FRONTEND_URL, // e.g., http://localhost:5173
+    credentials: true,                // allow cookies / auth headers
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 

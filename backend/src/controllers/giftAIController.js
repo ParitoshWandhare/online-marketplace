@@ -36,7 +36,7 @@ exports.generateGiftBundle = async (req, res) => {
     }
 
     // Enrich bundles with actual artwork data from MongoDB
-    const enrichedBundles = await enrichBundlesWithArtworkData(
+    const enrichmentResult = await enrichBundlesWithArtworkData(
       result.data.bundles
     );
 
@@ -46,8 +46,12 @@ exports.generateGiftBundle = async (req, res) => {
       bundle_id: result.data.bundle_id,
       vision: result.data.vision,
       intent: result.data.intent,
-      bundles: enrichedBundles,
-      metadata: result.data.metadata,
+      bundles: enrichmentResult.bundles,
+      metadata: {
+        ...result.data.metadata,
+        enrichment_stats: enrichmentResult.stats
+      },
+      warnings: enrichmentResult.warnings
     });
   } catch (error) {
     console.error("Error in generateGiftBundle:", error);
@@ -93,16 +97,20 @@ exports.searchSimilarGifts = async (req, res) => {
     }
 
     // Enrich with MongoDB data
-    const enrichedBundles = await enrichBundlesWithArtworkData(
+    const enrichmentResult = await enrichBundlesWithArtworkData(
       result.data.bundles
     );
 
     res.json({
       success: true,
       query: query,
-      count: enrichedBundles.length,
-      bundles: enrichedBundles,
-      metadata: result.data.metadata,
+      count: enrichmentResult.bundles.length,
+      bundles: enrichmentResult.bundles,
+      metadata: {
+        ...result.data.metadata,
+        enrichment_stats: enrichmentResult.stats
+      },
+      warnings: enrichmentResult.warnings
     });
   } catch (error) {
     console.error("Error in searchSimilarGifts:", error);
@@ -465,43 +473,139 @@ exports.healthCheck = async (req, res) => {
 
 /**
  * Enrich AI bundles with full artwork data from MongoDB
+ * Now includes detailed stats and warnings
  */
 async function enrichBundlesWithArtworkData(bundles) {
-  if (!bundles || bundles.length === 0) return [];
+  if (!bundles || bundles.length === 0) {
+    return {
+      bundles: [],
+      stats: { total: 0, found: 0, missing: 0 },
+      warnings: []
+    };
+  }
 
   const enriched = [];
+  const warnings = [];
+  const stats = {
+    total_items: 0,
+    found_items: 0,
+    missing_items: 0,
+    bundles_created: 0
+  };
 
   for (const bundle of bundles) {
     const enrichedItems = [];
 
     for (const item of bundle.items || []) {
+      stats.total_items++;
+      
       try {
-        // Find artwork in MongoDB by ID
-        const artwork = await Artwork.findById(item.mongo_id).populate(
-          "artistId",
-          "name email avatarUrl"
-        );
+        let artwork = null;
+
+        // Strategy 1: Find by mongo_id
+        if (item.mongo_id) {
+          try {
+            artwork = await Artwork.findById(item.mongo_id)
+              .populate("artistId", "name email avatarUrl");
+          } catch (err) {
+            console.warn(`⚠️ Invalid mongo_id: ${item.mongo_id}`);
+          }
+        }
+
+        // Strategy 2: Find by exact title match
+        if (!artwork && item.title) {
+          artwork = await Artwork.findOne({
+            title: item.title,
+            status: "published"
+          }).populate("artistId", "name email avatarUrl");
+        }
+
+        // Strategy 3: Find by fuzzy title match (case-insensitive)
+        if (!artwork && item.title) {
+          artwork = await Artwork.findOne({
+            title: new RegExp(`^${item.title}$`, 'i'),
+            status: "published"
+          }).populate("artistId", "name email avatarUrl");
+        }
+
+        // Strategy 4: Find by partial title match (last resort)
+        if (!artwork && item.title) {
+          const titleWords = item.title.split(/\s+/).filter(w => w.length > 3);
+          if (titleWords.length > 0) {
+            const titleRegex = new RegExp(titleWords.join('|'), 'i');
+            artwork = await Artwork.findOne({
+              title: titleRegex,
+              status: "published"
+            }).populate("artistId", "name email avatarUrl");
+          }
+        }
 
         if (artwork) {
+          stats.found_items++;
           enrichedItems.push({
-            ...item,
-            artwork: artwork, // Full artwork object
+            mongo_id: artwork._id.toString(),
+            title: artwork.title,
+            reason: item.reason || "Recommended for you",
+            price: artwork.price,
+            currency: artwork.currency || "INR",
+            artwork: {
+              _id: artwork._id,
+              title: artwork.title,
+              description: artwork.description,
+              price: artwork.price,
+              currency: artwork.currency,
+              quantity: artwork.quantity,
+              status: artwork.status,
+              tags: artwork.tags,
+              media: artwork.media,
+              likeCount: artwork.likeCount,
+              artistId: artwork.artistId,
+              createdAt: artwork.createdAt
+            }
           });
         } else {
-          // Keep original item if not found
-          enrichedItems.push(item);
+          stats.missing_items++;
+          const warningMsg = `Artwork not found: ${item.title || item.mongo_id || 'unknown'}`;
+          console.warn(`⚠️ ${warningMsg}`);
+          warnings.push(warningMsg);
         }
       } catch (error) {
-        console.error(`Error enriching item ${item.mongo_id}:`, error);
-        enrichedItems.push(item);
+        stats.missing_items++;
+        console.error(`Error enriching item ${item.title}:`, error);
+        warnings.push(`Error processing: ${item.title || 'unknown'} - ${error.message}`);
       }
     }
 
-    enriched.push({
-      ...bundle,
-      items: enrichedItems,
-    });
+    // Include bundles with at least one valid item
+    if (enrichedItems.length > 0) {
+      const totalPrice = enrichedItems.reduce(
+        (sum, item) => sum + (item.price || 0),
+        0
+      );
+
+      enriched.push({
+        ...bundle,
+        items: enrichedItems,
+        total_price: totalPrice,
+        item_count: enrichedItems.length
+      });
+      
+      stats.bundles_created++;
+    } else {
+      warnings.push(`Bundle "${bundle.bundle_name}" excluded - no valid items found`);
+    }
   }
 
-  return enriched;
+  // Log summary
+  console.log('📊 Enrichment Summary:');
+  console.log(`   Total items processed: ${stats.total_items}`);
+  console.log(`   ✅ Found: ${stats.found_items}`);
+  console.log(`   ❌ Missing: ${stats.missing_items}`);
+  console.log(`   📦 Bundles created: ${stats.bundles_created}`);
+
+  return {
+    bundles: enriched,
+    stats,
+    warnings: warnings.length > 0 ? warnings : undefined
+  };
 }

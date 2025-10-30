@@ -4,7 +4,7 @@ Unified Vector Store: Member B's embedding logic + Member A's async structure
 - Real embedding generation (Gemini → Ollama → Simple fallback)
 - Async MongoDB operations
 - Qdrant vector search
-FIXED: Proper None checks for Motor collections
+FIXED: Removed mock data fallback - always use real MongoDB
 """
 
 import logging
@@ -47,7 +47,8 @@ class VectorStore:
             self.mongo_collection = self.mongo_db[settings.COLLECTION_NAME]
             logger.info(f"✅ MongoDB connected: {settings.DATABASE_NAME}.{settings.COLLECTION_NAME}")
         except Exception as e:
-            logger.error(f"MongoDB connection failed: {e}")
+            logger.error(f"❌ MongoDB connection failed: {e}")
+            raise Exception(f"MongoDB connection required but failed: {e}")
 
         # Qdrant connection
         try:
@@ -58,9 +59,19 @@ class VectorStore:
                 )
                 logger.info("✅ Qdrant connected")
             else:
-                logger.warning("⚠️ Qdrant not configured")
+                logger.warning("⚠️ Qdrant not configured - checking if using local instance")
+                # Try local Qdrant without API key
+                try:
+                    self.qdrant_client = QdrantClient(url=settings.QDRANT_URL)
+                    # Test the connection
+                    self.qdrant_client.get_collections()
+                    logger.info("✅ Qdrant connected (local instance)")
+                except Exception as e:
+                    logger.error(f"❌ Qdrant connection failed: {e}")
+                    raise Exception(f"Qdrant connection required but failed: {e}")
         except Exception as e:
-            logger.error(f"Qdrant connection failed: {e}")
+            logger.error(f"❌ Qdrant connection failed: {e}")
+            raise Exception(f"Qdrant connection required but failed: {e}")
             
         # Initialize Gemini for embeddings
         if self.google_api_key:
@@ -163,15 +174,23 @@ class VectorStore:
             logger.info("MongoDB connection closed")
 
     async def get_mongo_items(self, limit: int = 100) -> List[Dict]:
-        """Fetch items from MongoDB asynchronously - FIXED: Proper None check"""
-        # FIXED: Compare with None instead of using 'not'
+        """
+        Fetch items from MongoDB asynchronously
+        FIXED: Removed mock data fallback - raises error if MongoDB not connected
+        """
         if self.mongo_collection is None:
-            logger.warning("MongoDB not connected, using mock data")
-            return self._get_mock_items()
+            error_msg = "MongoDB not connected - cannot fetch items"
+            logger.error(f"❌ {error_msg}")
+            raise Exception(error_msg)
         
         try:
+            # Query for published artworks only
             cursor = self.mongo_collection.find(
-                {"title": {"$exists": True}}
+                {
+                    "status": "published",
+                    "title": {"$exists": True},
+                    "description": {"$exists": True}
+                }
             ).limit(limit)
             
             items = []
@@ -184,37 +203,24 @@ class VectorStore:
                 doc.setdefault('price', 0)
                 items.append(doc)
             
-            logger.info(f"Retrieved {len(items)} items from MongoDB")
+            logger.info(f"📦 Retrieved {len(items)} published artworks from MongoDB")
+            
+            if len(items) == 0:
+                logger.warning("⚠️ No published artworks found in MongoDB!")
+                logger.warning("   Please create some artworks with status='published'")
+            
             return items
+            
         except Exception as e:
-            logger.error(f"Error fetching MongoDB items: {e}")
-            return self._get_mock_items()
-
-    def _get_mock_items(self) -> List[Dict]:
-        """Mock items for testing without MongoDB"""
-        return [
-            {
-                '_id': '1', 'title': 'Modern Art Painting',
-                'description': 'Beautiful abstract painting for home decoration',
-                'category': 'Art', 'price': 150.00
-            },
-            {
-                '_id': '2', 'title': 'Handcrafted Diya Set',
-                'description': 'Traditional oil lamps for Diwali celebrations',
-                'category': 'Home Decor', 'price': 25.00
-            },
-            {
-                '_id': '3', 'title': 'Office Desk Organizer',
-                'description': 'Wooden organizer for office supplies',
-                'category': 'Office', 'price': 35.00
-            }
-        ]
+            logger.error(f"❌ Error fetching MongoDB items: {e}")
+            raise
 
     async def setup_collection(self, collection_name: str = None) -> bool:
-        """Create Qdrant collection if it doesn't exist - FIXED: Proper None check"""
-        # FIXED: Compare with None
+        """Create Qdrant collection if it doesn't exist"""
         if self.qdrant_client is None:
-            return False
+            error_msg = "Qdrant not connected - cannot setup collection"
+            logger.error(f"❌ {error_msg}")
+            raise Exception(error_msg)
             
         collection_name = collection_name or self.collection_name
         
@@ -224,7 +230,7 @@ class VectorStore:
             exists = any(col.name == collection_name for col in collections.collections)
             
             if exists:
-                logger.info(f"Collection '{collection_name}' already exists")
+                logger.info(f"✅ Collection '{collection_name}' already exists")
                 return True
             
             # Create new collection (768-dim for Gemini/Ollama, auto-pads if needed)
@@ -235,13 +241,18 @@ class VectorStore:
             logger.info(f"✅ Created Qdrant collection: {collection_name}")
             return True
         except Exception as e:
-            logger.error(f"Collection setup failed: {e}")
-            return False
+            logger.error(f"❌ Collection setup failed: {e}")
+            raise
 
     async def upload_items(self, items: List[Dict], collection_name: str = None) -> bool:
-        """Upload items to Qdrant with real embeddings - FIXED: Proper None checks"""
-        # FIXED: Compare with None and check items
-        if self.qdrant_client is None or not items:
+        """Upload items to Qdrant with real embeddings"""
+        if self.qdrant_client is None:
+            error_msg = "Qdrant not connected - cannot upload items"
+            logger.error(f"❌ {error_msg}")
+            raise Exception(error_msg)
+            
+        if not items:
+            logger.warning("⚠️ No items to upload")
             return False
             
         collection_name = collection_name or self.collection_name
@@ -254,7 +265,7 @@ class VectorStore:
                 embedding = self.generate_embedding(text)
                 
                 if not embedding:
-                    logger.warning(f"Skipping item {index}: no embedding generated")
+                    logger.warning(f"⚠️ Skipping item {index}: no embedding generated")
                     continue
                 
                 # Pad/truncate to 768-dim (Qdrant collection size)
@@ -277,26 +288,30 @@ class VectorStore:
                     }
                 )
                 points.append(point)
+                logger.debug(f"  ✓ Prepared: {item.get('title', 'Unknown')}")
             
             if points:
                 self.qdrant_client.upsert(collection_name=collection_name, points=points)
                 logger.info(f"✅ Uploaded {len(points)} items to Qdrant")
                 return True
             else:
-                logger.warning("No valid points to upload")
+                logger.warning("⚠️ No valid points to upload")
                 return False
         except Exception as e:
-            logger.error(f"Upload failed: {e}")
+            logger.error(f"❌ Upload failed: {e}")
             import traceback
             traceback.print_exc()
-            return False
+            raise
 
     async def search_related_items(self, text: str, collection_name: str = None, limit: int = 10) -> List[Dict]:
-        """Search Qdrant for similar items - FIXED: Proper None check"""
-        # FIXED: Compare with None
+        """
+        Search Qdrant for similar items
+        FIXED: Removed mock data fallback - raises error if Qdrant not connected
+        """
         if self.qdrant_client is None:
-            logger.warning("Qdrant not connected, returning mock results")
-            return self._get_mock_items()[:limit]
+            error_msg = "Qdrant not connected - cannot search"
+            logger.error(f"❌ {error_msg}")
+            raise Exception(error_msg)
             
         collection_name = collection_name or self.collection_name
         
@@ -304,7 +319,7 @@ class VectorStore:
             # Generate query embedding
             query_embedding = self.generate_embedding(text)
             if not query_embedding:
-                logger.error("Failed to generate query embedding")
+                logger.error("❌ Failed to generate query embedding")
                 return []
             
             # Pad/truncate to 768-dim
@@ -333,8 +348,10 @@ class VectorStore:
                     'mongo_id': result.payload.get('mongo_id', '')
                 })
             
-            logger.info(f"Found {len(items)} similar items for query: '{text}'")
+            logger.info(f"🔍 Found {len(items)} similar items for query: '{text}'")
             return items
         except Exception as e:
-            logger.error(f"Search failed: {e}")
-            return []
+            logger.error(f"❌ Search failed: {e}")
+            import traceback
+            traceback.print_exc()
+            raise

@@ -3,7 +3,7 @@
 Unified Orchestrator combining Member A's Vision AI pipeline + Member B's text search
 - Image-to-bundle: Vision AI → Intent → Retrieval → Bundle
 - Text-to-bundle: Intent → Retrieval → Bundle
-FIXED: Proper None checks for Motor collections
+FIXED: Proper None checks for Motor collections + Lenient validation
 """
 
 import logging
@@ -156,10 +156,14 @@ class GiftOrchestrator:
     # ========================================================================
     # MEMBER A PIPELINE: Image → Full Bundle (Vision AI)
     # ========================================================================
+# Only replace the generate_bundle method in your orchestrator.py
+# Keep everything else the same, especially process_gift_query
+
     async def generate_bundle(self, image_bytes: bytes, filename: str = "upload.jpg") -> Dict[str, Any]:
         """
         Full GenAI pipeline for image-based gift recommendations
         Flow: Image → Vision AI → Intent → Retrieval → Validation → Bundle
+        FIXED: Pass vector_store instance to retrieve_similar
         """
         bundle_id = str(uuid.uuid4())
         logger.info(f"🎁 Starting image bundle generation: {bundle_id}")
@@ -185,32 +189,78 @@ class GiftOrchestrator:
             intent = await extract_intent(image_bytes, vision)
             fallback["intent"] = intent
 
-            # Step 3: Semantic Retrieval
+            # Step 3: Semantic Retrieval (FIXED: Pass vector_store instance)
             logger.info("🔍 Step 3: Retrieving similar gifts...")
-            similar_gifts = await retrieve_similar(intent, top_k=5)
-            fallback["metadata"]["total_retrieved"] = len(similar_gifts)
+            try:
+                similar_gifts = await retrieve_similar(
+                    intent, 
+                    top_k=5,
+                    vector_store=self.vector_store  # Pass the connected instance
+                )
+                fallback["metadata"]["total_retrieved"] = len(similar_gifts)
+                
+                if not similar_gifts:
+                    fallback["error"] = "No items found in vector store. Please run refresh_vector_store first."
+                    logger.error("❌ No items retrieved from vector store")
+                    logger.error("   → Check if Qdrant is running and has data")
+                    logger.error("   → Run: POST /refresh_vector_store to sync MongoDB → Qdrant")
+                    return fallback
+                    
+            except Exception as retrieval_error:
+                fallback["error"] = f"Retrieval failed: {str(retrieval_error)}"
+                logger.error(f"❌ Retrieval error: {retrieval_error}")
+                logger.error("   → Is Qdrant running?")
+                logger.error("   → Run: POST /refresh_vector_store to initialize")
+                import traceback
+                traceback.print_exc()
+                return fallback
 
-            # Step 4: Validation
+            # Step 4: Validation (More lenient budget checking)
             logger.info("✅ Step 4: Validating items...")
+            
+            # Only apply budget if it's explicitly high AND user-specified
+            # For image-based search, ignore the AI-extracted budget (too unreliable)
+            budget = intent.get("budget_inr")
+            
+            # Don't apply budget filter for image-based searches
+            # The AI often sets unrealistic low budgets like ₹1000
+            max_budget = None
+            logger.info(f"💰 Budget filter: Disabled for image-based search (AI estimated: ₹{budget})")
+            
             valid_gifts, invalid_gifts = validate_items(
                 similar_gifts, 
-                max_budget=intent.get("budget_inr", 1000)
+                max_budget=max_budget,
+                min_quality_score=0.0  # Accept all similarity scores
             )
             fallback["metadata"]["valid_count"] = len(valid_gifts)
             fallback["metadata"]["invalid_count"] = len(invalid_gifts)
 
             if not valid_gifts:
-                fallback["error"] = "No valid gifts found after validation"
+                fallback["error"] = "No valid gifts found after validation. Items may be missing required fields."
                 logger.warning("⚠️ No valid gifts after validation")
+                if invalid_gifts:
+                    logger.info("Invalid items details:")
+                    for inv in invalid_gifts[:3]:  # Show first 3
+                        logger.info(f"  - {inv.get('reason', 'Unknown reason')}")
                 return fallback
 
             # Step 5: Bundle Generation
             logger.info("🎨 Step 5: Generating bundles...")
-            result = await self.bundle_service.generate_bundles(str(intent), valid_gifts)
-            fallback["bundles"] = result.get("bundles", [])
-
-            logger.info(f"✅ Bundle {bundle_id} generated successfully")
-            fallback.pop("error", None)
+            try:
+                result = await self.bundle_service.generate_bundles(str(intent), valid_gifts)
+                fallback["bundles"] = result.get("bundles", [])
+                
+                if not fallback["bundles"]:
+                    fallback["error"] = "Bundle generation succeeded but produced no bundles"
+                    logger.warning("⚠️ No bundles generated from valid gifts")
+                else:
+                    logger.info(f"✅ Bundle {bundle_id} generated successfully with {len(fallback['bundles'])} bundles")
+                    fallback.pop("error", None)
+                    
+            except Exception as bundle_error:
+                fallback["error"] = f"Bundle generation failed: {str(bundle_error)}"
+                logger.error(f"❌ Bundle generation error: {bundle_error}")
+                
             return fallback
 
         except Exception as e:
@@ -287,9 +337,13 @@ class GiftOrchestrator:
                     'error': 'No matching items found. Please refresh vector store first.'
                 }
 
-            # Step 2: Validate
+            # Step 2: Validate (FIXED: No budget limit for text search)
             logger.info("Step 2: Validating items...")
-            valid_items, invalid_items = validate_items(items)
+            valid_items, invalid_items = validate_items(
+                items,
+                max_budget=None,  # No budget limit for text search
+                min_quality_score=0.0  # Accept all similarity scores
+            )
 
             if not valid_items:
                 logger.warning("⚠️ No valid items")

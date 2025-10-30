@@ -1,4 +1,4 @@
-// src/services/giftAi.ts
+// frontend/src/services/giftAi.ts
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_GIFT_AI_API_URL || 'http://localhost:4000/api/v1/gift-ai';
@@ -31,18 +31,20 @@ export interface Artwork {
   status: 'draft' | 'published' | 'out_of_stock' | 'removed';
   tags: string[];
   media: Media[];
+  likeCount?: number;
   artistId: Artist | string;
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
 }
 
 export interface BundleItem {
   mongo_id: string;
   title: string;
+  reason: string;
   price: number;
+  currency: string;
   similarity?: number;
-  artwork?: Artwork; // Enriched with full MongoDB artwork data
-  reason?: string;
+  artwork: Artwork; // Always enriched with full MongoDB artwork data
 }
 
 export interface GiftBundle {
@@ -52,7 +54,15 @@ export interface GiftBundle {
   description?: string;
   theme?: string;
   total_price: number;
+  item_count: number;
   items: BundleItem[];
+}
+
+export interface EnrichmentStats {
+  total_items: number;
+  found_items: number;
+  missing_items: number;
+  bundles_created: number;
 }
 
 export interface GenerateBundleResponse {
@@ -62,7 +72,11 @@ export interface GenerateBundleResponse {
   vision?: any;
   intent?: any;
   bundles: GiftBundle[];
-  metadata?: any;
+  metadata?: {
+    enrichment_stats: EnrichmentStats;
+    [key: string]: any;
+  };
+  warnings?: string[];
 }
 
 export interface SearchResponse {
@@ -70,7 +84,11 @@ export interface SearchResponse {
   query: string;
   count: number;
   bundles: GiftBundle[];
-  metadata?: any;
+  metadata?: {
+    enrichment_stats: EnrichmentStats;
+    [key: string]: any;
+  };
+  warnings?: string[];
 }
 
 export interface VisionResponse {
@@ -96,6 +114,12 @@ export interface HealthCheckResponse {
 export interface VectorStoreInfoResponse {
   success: boolean;
   data: any;
+}
+
+export interface RefreshVectorStoreResponse {
+  success: boolean;
+  message: string;
+  data?: any;
 }
 
 export interface IndexArtworkResponse {
@@ -159,6 +183,12 @@ class GiftAIService {
     );
     
     console.log('✅ Bundle generated:', res.data);
+    
+    // Log warnings if present
+    if (res.data.warnings && res.data.warnings.length > 0) {
+      console.warn('⚠️ Bundle generation warnings:', res.data.warnings);
+    }
+    
     return res.data;
   }
 
@@ -181,6 +211,12 @@ class GiftAIService {
     });
 
     console.log('✅ Search results:', res.data);
+    
+    // Log warnings if present
+    if (res.data.warnings && res.data.warnings.length > 0) {
+      console.warn('⚠️ Search warnings:', res.data.warnings);
+    }
+    
     return res.data;
   }
 
@@ -264,11 +300,15 @@ class GiftAIService {
    * POST /api/v1/gift-ai/refresh-vector-store
    * Requires: Authentication
    */
-  async refreshVectorStore(): Promise<any> {
+  async refreshVectorStore(): Promise<RefreshVectorStoreResponse> {
     console.log('🔄 Refreshing vector store...');
-    const res = await this.api.post('/refresh-vector-store', null, {
-      timeout: 300000, // 5 minutes
-    });
+    const res: AxiosResponse<RefreshVectorStoreResponse> = await this.api.post(
+      '/refresh-vector-store', 
+      null, 
+      {
+        timeout: 300000, // 5 minutes
+      }
+    );
     console.log('✅ Vector store refreshed:', res.data);
     return res.data;
   }

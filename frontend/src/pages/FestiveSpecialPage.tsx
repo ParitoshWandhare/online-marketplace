@@ -19,7 +19,7 @@ const FESTIVALS: { [key: number]: { tags: string[]; banner: string; color: strin
   8: { tags: ["friendship", "gift", "celebration"], banner: "🤝 Friendship Month Specials!", color: "bg-green-200" },
   9: { tags: ["diwali", "lights", "gift"], banner: "🪔 Happy Diwali Month!", color: "bg-yellow-100" },
   10: { tags: ["diwali", "lights", "gift"], banner: "🪔 Happy Diwali Month!", color: "bg-yellow-100" },
-  11: { tags: ["thanksgiving", "harvest", "gift"], banner: "🦃 Thanksgiving Specials!", color: "bg-orange-200" },
+  11: { tags: ["cold", "winter", "gift", "snow"], banner: "🦃 Winter Specials!", color: "bg-blue-200" },
   12: { tags: ["christmas", "xmas", "tree", "gift"], banner: "🎄 Merry Christmas Month!", color: "bg-red-100" },
 };
 

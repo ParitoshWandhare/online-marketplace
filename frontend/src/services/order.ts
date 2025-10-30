@@ -1,6 +1,6 @@
+//frontend/src/services/order.ts
 import apiClient from '@/lib/axios';
 
-// Interfaces for the populated documents from the backend
 interface PopulatedArtwork {
   _id: string;
   title: string;
@@ -14,6 +14,19 @@ interface PopulatedUser {
   name: string;
   email: string;
   avatarUrl?: string;
+}
+
+// Shipping address interface
+interface ShippingAddress {
+  fullName: string;
+  phone: string;
+  addressLine1: string;
+  addressLine2?: string;
+  city: string;
+  state: string;
+  pincode: string;
+  country?: string;
+  landmark?: string;
 }
 
 export interface Order {
@@ -36,6 +49,10 @@ export interface Order {
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
   razorpaySignature?: string;
+  shippingAddress: ShippingAddress;  // Added as per Order model
+  trackingNumber?: string;
+  shippedAt?: string;
+  deliveredAt?: string;
   createdAt: string;
   updatedAt: string;
 }

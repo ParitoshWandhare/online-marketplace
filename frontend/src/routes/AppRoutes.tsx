@@ -112,9 +112,11 @@ export const AppRoutes = () => {
       <Route 
         path="/gift-ai" 
         element={
+          <RequireAuth>
           <MainLayout>
             <GiftServicePage />
           </MainLayout>
+          </RequireAuth>
         } 
       />
       

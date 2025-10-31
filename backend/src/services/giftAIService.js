@@ -5,10 +5,10 @@ const fs = require("fs");
 
 // AI Service URLs from environment variables
 const GIFT_AI_BASE_URL = process.env.GIFT_AI_SERVICE_URL || "http://localhost:8001";
-const VISION_AI_BASE_URL = process.env.VISION_AI_SERVICE_URL || "http://localhost:8004";
+//const VISION_AI_BASE_URL = process.env.VISION_AI_SERVICE_URL || "http://localhost:8001";
 
 // Timeout configuration
-const AI_REQUEST_TIMEOUT = 60000; // 60 seconds
+const AI_REQUEST_TIMEOUT = 1200000; // 120 seconds
 
 /**
  * Gift AI Service Client
@@ -20,10 +20,10 @@ class GiftAIService {
       baseURL: GIFT_AI_BASE_URL,
       timeout: AI_REQUEST_TIMEOUT,
       headers: { "Content-Type": "application/json" },
-    });
+    });GIFT_AI_BASE_URL
 
     this.visionClient = axios.create({
-      baseURL: VISION_AI_BASE_URL,
+      baseURL: GIFT_AI_BASE_URL,
       timeout: AI_REQUEST_TIMEOUT,
     });
   }
@@ -51,7 +51,7 @@ class GiftAIService {
         formData,
         {
           headers: formData.getHeaders(),
-          timeout: 90000, // 90 seconds for image processing
+          timeout: 1800000, // 180 seconds for image processing
         }
       );
 

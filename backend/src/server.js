@@ -61,5 +61,5 @@ app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`📦 Backend API: http://localhost:${PORT}`);
   console.log(`🎁 Gift AI Service: ${process.env.GIFT_AI_SERVICE_URL || "http://localhost:8001"}`);
-  console.log(`👁️ Vision AI Service: ${process.env.VISION_AI_SERVICE_URL || "http://localhost:8004"}`);
+  //console.log(`👁️ Vision AI Service: ${process.env.VISION_AI_SERVICE_URL || "http://localhost:8001"}`);
 });

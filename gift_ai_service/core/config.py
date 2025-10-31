@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # Microservices URLs
     LANGUAGE_SERVICE_URL: str = "http://127.0.0.1:8001"
     VECTOR_SERVICE_URL: str = "http://127.0.0.1:8002"
-    VISION_AI_SERVICE_URL: str = "http://127.0.0.1:8004"
+    VISION_AI_SERVICE_URL: str = "http://127.0.0.1:8001"
     
     # App Config
     ENVIRONMENT: str = "development"

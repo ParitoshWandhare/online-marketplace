@@ -138,7 +138,7 @@ class GiftAIService {
   constructor() {
     this.api = axios.create({
       baseURL: API_BASE_URL,
-      timeout: 90000,
+      timeout: 1200000,
       withCredentials: true,
       headers: { 
         'Content-Type': 'application/json' 

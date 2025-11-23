@@ -9,7 +9,7 @@ pydantic-settings==2.6.1
 
 # Database clients
 motor==3.6.0              # Async MongoDB
-pymongo==4.10.1           # Sync MongoDB
+pymongo==4.9.1           # Sync MongoDB
 qdrant-client==1.12.1     # Vector database
 
 # LLM APIs

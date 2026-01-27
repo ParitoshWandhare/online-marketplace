@@ -2,13 +2,18 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Minus, Plus, Trash2, ShoppingCart, ArrowLeft, CreditCard } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Minus, Plus, Trash2, ShoppingCart, ArrowLeft, CreditCard, MapPin, Plus as PlusIcon } from 'lucide-react';
 import { cartService, type Cart } from '@/services/cart';
 import { artworkService } from '@/services/artwork';
+import { userService, Address } from '@/services/user';
+import { orderService } from '@/services/order';
 import { Loader } from '@/components/ui/Loader';
 import { EmptyState } from '@/components/ui/EmptyState';
 import { useToast } from '@/hooks/use-toast';
 import { toast } from 'sonner';
+import { Badge } from '@/components/ui/badge';
+import { AddAddressForm } from '@/components/forms/AddAddressForm';
 
 declare global {
   interface Window {
@@ -26,6 +31,7 @@ interface PopulatedCartItem {
     media: Array<{ url: string; type: string }>;
     quantity: number;
     status: string;
+    artistId: string;
   } | null;
   qty: number;
 }
@@ -36,10 +42,15 @@ const CartPage = () => {
   const [loading, setLoading] = useState(true);
   const [processingPayment, setProcessingPayment] = useState(false);
   const [total, setTotal] = useState(0);
+  const [addresses, setAddresses] = useState<Address[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string>('');
+  const [showAddressDialog, setShowAddressDialog] = useState(false);
+  const [showAddAddressDialog, setShowAddAddressDialog] = useState(false);
   const { toast: hookToast } = useToast();
 
   useEffect(() => {
     loadCart();
+    loadAddresses();
     loadRazorpayScript();
   }, []);
 
@@ -57,6 +68,22 @@ const CartPage = () => {
     });
   };
 
+  const loadAddresses = async () => {
+    try {
+      const response = await userService.getAddresses();
+      if (response.success) {
+        setAddresses(response.addresses);
+        // Set default address if available
+        const defaultAddr = response.addresses.find(addr => addr.isDefault);
+        if (defaultAddr) {
+          setSelectedAddressId(defaultAddr._id);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading addresses:', error);
+    }
+  };
+
   const loadCart = async () => {
     try {
       const response = await cartService.getCart();
@@ -64,21 +91,18 @@ const CartPage = () => {
         setCart(response.cart);
         setTotal(response.total || 0);
         
-        // If cart has items but they're not populated, fetch artwork details
         if (response.cart.items && response.cart.items.length > 0) {
           await populateCartItems(response.cart.items);
         } else {
           setPopulatedItems([]);
         }
       } else {
-        // Handle case where cart doesn't exist yet
         setCart({ _id: '', userId: '', items: [], createdAt: '', updatedAt: '' });
         setPopulatedItems([]);
         setTotal(0);
       }
     } catch (error) {
       console.error('Error loading cart:', error);
-      // Set empty cart on error
       setCart({ _id: '', userId: '', items: [], createdAt: '', updatedAt: '' });
       setPopulatedItems([]);
       setTotal(0);
@@ -89,73 +113,68 @@ const CartPage = () => {
   };
 
   const populateCartItems = async (items: any[]) => {
-  const populated: PopulatedCartItem[] = [];
+    const populated: PopulatedCartItem[] = [];
 
-  for (const item of items) {
-    try {
-      // --- Normalize artworkId ---
-      let artworkId: string = '';
-      if (typeof item.artworkId === 'string') {
-        artworkId = item.artworkId;
-      } else if (item.artworkId?._id) {
-        artworkId = item.artworkId._id;
-      } else if (item.artworkId?.$oid) {
-        artworkId = item.artworkId.$oid;
-      }
+    for (const item of items) {
+      try {
+        let artworkId: string = '';
+        if (typeof item.artworkId === 'string') {
+          artworkId = item.artworkId;
+        } else if (item.artworkId?._id) {
+          artworkId = item.artworkId._id;
+        } else if (item.artworkId?.$oid) {
+          artworkId = item.artworkId.$oid;
+        }
 
-      // --- Normalize qty ---
-      let qty: number = item.qty;
-      if (item.qty?.$numberInt) {
-        qty = parseInt(item.qty.$numberInt, 10);
-      }
+        let qty: number = item.qty;
+        if (item.qty?.$numberInt) {
+          qty = parseInt(item.qty.$numberInt, 10);
+        }
 
-      // --- If already populated with artwork details ---
-      if (typeof item.artworkId === 'object' && item.artworkId._id) {
+        if (typeof item.artworkId === 'object' && item.artworkId._id) {
+          populated.push({
+            artworkId,
+            artwork: item.artworkId,
+            qty,
+          });
+        } else {
+          const artworkResponse = await artworkService.getArtworkById(artworkId);
+          populated.push({
+            artworkId,
+            artwork: artworkResponse.success ? artworkResponse.artwork : null,
+            qty,
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching artwork details:', error);
+
+        let artworkId = typeof item.artworkId === 'string'
+          ? item.artworkId
+          : item.artworkId?._id || item.artworkId?.$oid;
+
+        let qty = item.qty?.$numberInt
+          ? parseInt(item.qty.$numberInt, 10)
+          : item.qty;
+
         populated.push({
           artworkId,
-          artwork: item.artworkId,
-          qty,
-        });
-      } else {
-        // --- Fetch artwork details from service ---
-        const artworkResponse = await artworkService.getArtworkById(artworkId);
-        populated.push({
-          artworkId,
-          artwork: artworkResponse.success ? artworkResponse.artwork : null,
+          artwork: null,
           qty,
         });
       }
-    } catch (error) {
-      console.error('Error fetching artwork details:', error);
-
-      let artworkId = typeof item.artworkId === 'string'
-        ? item.artworkId
-        : item.artworkId?._id || item.artworkId?.$oid;
-
-      let qty = item.qty?.$numberInt
-        ? parseInt(item.qty.$numberInt, 10)
-        : item.qty;
-
-      populated.push({
-        artworkId,
-        artwork: null,
-        qty,
-      });
     }
-  }
 
-  setPopulatedItems(populated);
+    setPopulatedItems(populated);
 
-  // --- Calculate total ---
-  const calculatedTotal = populated.reduce((sum, item) => {
-    if (item.artwork) {
-      return sum + item.artwork.price * item.qty;
-    }
-    return sum;
-  }, 0);
+    const calculatedTotal = populated.reduce((sum, item) => {
+      if (item.artwork) {
+        return sum + item.artwork.price * item.qty;
+      }
+      return sum;
+    }, 0);
 
-  setTotal(calculatedTotal);
-};
+    setTotal(calculatedTotal);
+  };
 
   const getCurrencySymbol = (currency: string) => {
     const symbols: { [key: string]: string } = {
@@ -176,7 +195,6 @@ const CartPage = () => {
         setCart(response.cart || null);
         setTotal(response.total || 0);
         
-        // Update populated items
         setPopulatedItems(prev => 
           prev.map(item => 
             item.artworkId === artworkId 
@@ -198,7 +216,6 @@ const CartPage = () => {
         setCart(response.cart || null);
         setTotal(response.total || 0);
         
-        // Remove from populated items
         setPopulatedItems(prev => 
           prev.filter(item => item.artworkId !== artworkId)
         );
@@ -211,19 +228,52 @@ const CartPage = () => {
     }
   };
 
- const handleCheckout = async () => {
+  const handleAddAddress = async (addressData: any) => {
+    try {
+      const response = await userService.addAddress(addressData);
+      if (response.success) {
+        setAddresses([...addresses, response.address]);
+        setSelectedAddressId(response.address._id);
+        setShowAddAddressDialog(false);
+        toast.success('Address added successfully');
+      }
+    } catch (error) {
+      toast.error('Failed to add address');
+    }
+  };
+
+  const handleCheckout = async () => {
     if (!cart || cart.items.length === 0) {
       toast.error('Your cart is empty');
+      return;
+    }
+
+    if (!selectedAddressId) {
+      toast.error('Please select a shipping address');
+      setShowAddressDialog(true);
       return;
     }
 
     try {
       setProcessingPayment(true);
       
-      const orderResponse = await cartService.createOrderFromCart();
+      // Prepare items with seller info
+      const orderItems = populatedItems
+        .filter(item => item.artwork)
+        .map(item => ({
+          artworkId: item.artworkId,
+          sellerId: item.artwork!.artistId,
+          qty: item.qty
+        }));
+
+      // Create order with shipping address
+      const orderResponse = await orderService.createOrder({
+        items: orderItems,
+        shippingAddressId: selectedAddressId
+      });
       
       if (!orderResponse.success || !orderResponse.created || orderResponse.created.length === 0) {
-        toast.error(orderResponse.message || 'Failed to create order');
+        toast.error('Failed to create order');
         return;
       }
 
@@ -231,56 +281,52 @@ const CartPage = () => {
       let allPaymentsSuccessful = true;
       for (let i = 0; i < orderResponse.created.length; i++) {
         const orderGroup = orderResponse.created[i];
-        const { razorpayOrder, orderId } = orderGroup;
+        const { razorpayOrder, order } = orderGroup;
         
         if (!razorpayOrder) {
-          toast.error(`Failed to initialize payment for order ${orderId}`);
+          toast.error(`Failed to initialize payment for order ${order._id}`);
           allPaymentsSuccessful = false;
           continue;
         }
         
-        // Wait for user to complete this payment before opening next
         const paymentPromise = new Promise<void>((resolve, reject) => {
           const options = {
             key: import.meta.env.VITE_RAZORPAY_KEY_ID || 'your_razorpay_key_id',
             amount: razorpayOrder.amount,
             currency: razorpayOrder.currency,
-            name: `Artisan Marketplace - Order ${orderId}`,
-            description: `Payment for order ${orderId}`,
+            name: 'Artisan Marketplace',
+            description: `Payment for Order ${i + 1} of ${orderResponse.created.length}`,
             order_id: razorpayOrder.id,
             handler: async function (response: any) {
               try {
-                const verifyResponse = await cartService.verifyPayment({
+                const verifyResponse = await orderService.verifyPayment({
                   razorpayOrderId: response.razorpay_order_id,
                   razorpayPaymentId: response.razorpay_payment_id,
-                  razorpaySignature: response.razorpay_signature,
-                  orderId: orderId // Pass orderId for verification
+                  razorpaySignature: response.razorpay_signature
                 });
 
                 if (verifyResponse.success) {
-                  toast.success(`Payment successful for order ${orderId}!`);
+                  toast.success(`Payment ${i + 1} successful!`);
                   resolve();
                 } else {
-                  toast.error(`Payment verification failed for order ${orderId}`);
-                  reject(new Error(`Payment verification failed for order ${orderId}`));
+                  toast.error(`Payment verification failed`);
+                  reject(new Error('Payment verification failed'));
                 }
               } catch (error) {
                 console.error('Payment verification error:', error);
-                toast.error(`Payment verification failed for order ${orderId}`);
+                toast.error('Payment verification failed');
                 reject(error);
               }
             },
             modal: {
               ondismiss: function() {
-                // User closed the payment modal without completing
-                toast.error(`Payment cancelled for order ${orderId}`);
-                reject(new Error(`Payment cancelled for order ${orderId}`));
+                toast.error('Payment cancelled');
+                reject(new Error('Payment cancelled'));
               }
             },
             prefill: {
-              name: 'Customer Name',
-              email: 'customer@example.com',
-              contact: '9999999999',
+              name: addresses.find(a => a._id === selectedAddressId)?.fullName || 'Customer',
+              contact: addresses.find(a => a._id === selectedAddressId)?.phone || '9999999999',
             },
             theme: {
               color: '#3B82F6',
@@ -297,18 +343,13 @@ const CartPage = () => {
         });
 
         try {
-          // Wait for this payment to complete before proceeding to next
           await paymentPromise;
-          
-          // Small delay to ensure UI updates
           await new Promise(resolve => setTimeout(resolve, 500));
         } catch (error) {
-          console.error(`Error processing payment for order ${orderId}:`, error);
+          console.error(`Error processing payment:`, error);
           allPaymentsSuccessful = false;
-          // Don't break the loop, continue with next payment
-          // But you might want to ask user if they want to continue
           const continueAnyway = window.confirm(
-            `Payment failed for order ${orderId}. Continue with remaining payments?`
+            `Payment failed. Continue with remaining payments?`
           );
           if (!continueAnyway) {
             break;
@@ -316,7 +357,6 @@ const CartPage = () => {
         }
       }
 
-      // Reload cart and redirect if all payments were successful
       if (allPaymentsSuccessful) {
         toast.success('All payments completed successfully!');
         await loadCart();
@@ -325,7 +365,7 @@ const CartPage = () => {
         }, 1000);
       } else {
         toast.warning('Some payments may have failed. Please check your orders.');
-        await loadCart(); // Reload to show current status
+        await loadCart();
       }
       
     } catch (error: any) {
@@ -357,6 +397,8 @@ const CartPage = () => {
       </div>
     );
   }
+
+  const selectedAddress = addresses.find(a => a._id === selectedAddressId);
 
   return (
     <div className="min-h-screen bg-background">
@@ -484,6 +526,53 @@ const CartPage = () => {
                 <CardTitle>Order Summary</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Shipping Address Section */}
+                <div className="border rounded-lg p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold flex items-center gap-2">
+                      <MapPin className="w-4 h-4" />
+                      Shipping Address
+                    </h3>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setShowAddressDialog(true)}
+                    >
+                      Change
+                    </Button>
+                  </div>
+                  
+                  {selectedAddress ? (
+                    <div className="text-sm space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="secondary">{selectedAddress.label}</Badge>
+                        {selectedAddress.isDefault && (
+                          <Badge variant="outline" className="text-xs">Default</Badge>
+                        )}
+                      </div>
+                      <p className="font-medium">{selectedAddress.fullName}</p>
+                      <p className="text-muted-foreground">{selectedAddress.addressLine1}</p>
+                      {selectedAddress.addressLine2 && (
+                        <p className="text-muted-foreground">{selectedAddress.addressLine2}</p>
+                      )}
+                      <p className="text-muted-foreground">
+                        {selectedAddress.city}, {selectedAddress.state} - {selectedAddress.pincode}
+                      </p>
+                      <p className="text-muted-foreground">Phone: {selectedAddress.phone}</p>
+                    </div>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => setShowAddAddressDialog(true)}
+                    >
+                      <PlusIcon className="w-4 h-4 mr-2" />
+                      Add Shipping Address
+                    </Button>
+                  )}
+                </div>
+
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span>Subtotal ({populatedItems.length} items)</span>
@@ -503,7 +592,7 @@ const CartPage = () => {
 
                 <Button
                   onClick={handleCheckout}
-                  disabled={processingPayment}
+                  disabled={processingPayment || !selectedAddressId}
                   className="w-full btn-gradient"
                   size="lg"
                 >
@@ -528,6 +617,72 @@ const CartPage = () => {
           </div>
         </div>
       </div>
+
+      {/* Address Selection Dialog */}
+      <Dialog open={showAddressDialog} onOpenChange={setShowAddressDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Select Shipping Address</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {addresses.map((address) => (
+              <Card
+                key={address._id}
+                className={`cursor-pointer transition-all ${
+                  selectedAddressId === address._id
+                    ? 'border-primary ring-2 ring-primary'
+                    : 'hover:border-primary/50'
+                }`}
+                onClick={() => {
+                  setSelectedAddressId(address._id);
+                  setShowAddressDialog(false);
+                }}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="secondary">{address.label}</Badge>
+                      {address.isDefault && (
+                        <Badge variant="outline" className="text-xs">Default</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <p className="font-medium">{address.fullName}</p>
+                  <p className="text-sm text-muted-foreground">{address.addressLine1}</p>
+                  {address.addressLine2 && (
+                    <p className="text-sm text-muted-foreground">{address.addressLine2}</p>
+                  )}
+                  <p className="text-sm text-muted-foreground">
+                    {address.city}, {address.state} - {address.pincode}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Phone: {address.phone}</p>
+                </CardContent>
+              </Card>
+            ))}
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                setShowAddressDialog(false);
+                setShowAddAddressDialog(true);
+              }}
+            >
+              <PlusIcon className="w-4 h-4 mr-2" />
+              Add New Address
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Address Dialog */}
+      <Dialog open={showAddAddressDialog} onOpenChange={setShowAddAddressDialog}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Add New Address</DialogTitle>
+          </DialogHeader>
+          <AddAddressForm onSuccess={handleAddAddress} />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

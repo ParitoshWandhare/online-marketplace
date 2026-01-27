@@ -2,6 +2,8 @@
 # More GitHub Actions for Azure: https://github.com/Azure/actions
 # More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
 
+# Docs: https://github.com/Azure/webapps-deploy
+
 name: Build and deploy Python app to Azure Web App - orchid-genai
 
 on:
@@ -26,20 +28,20 @@ jobs:
           python-version: '3.13'
 
       - name: Create venv and install dependencies
-        working-directory: gift_ai_service
+        working-directory: genai_service
         run: |
           python -m venv antenv
           source antenv/bin/activate
           pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Upload Python app artifact
+      - name: Upload GenAI service artifact
         uses: actions/upload-artifact@v4
         with:
-          name: python-app
+          name: genai-app
           path: |
-            gift_ai_service
-            !gift_ai_service/antenv/
+            genai_service
+            !genai_service/antenv/
 
   deploy:
     runs-on: ubuntu-latest
@@ -52,8 +54,8 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: python-app
-          path: gift_ai_service
+          name: genai-app
+          path: genai_service
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -67,5 +69,6 @@ jobs:
         with:
           app-name: 'orchid-genai'
           slot-name: 'Production'
-          package: gift_ai_service
+          package: genai_service
+
           

@@ -3,6 +3,10 @@ import axios, { AxiosInstance, AxiosResponse } from 'axios';
 
 //const API_BASE_URL = import.meta.env.VITE_GIFT_AI_API_URL || 'http://localhost:4000/api/v1/gift-ai';
 const API_BASE_URL = import.meta.env.VITE_GIFT_AI_API_URL || `${import.meta.env.VITE_API_BASE_URL}/gift-ai`;
+
+// Debug logging to see what URL is being used
+console.log('🎁 Gift AI Service URL:', API_BASE_URL);
+console.log('🎁 Environment VITE_GIFT_AI_API_URL:', import.meta.env.VITE_GIFT_AI_API_URL);
 // ========================================================================
 // TYPE DEFINITIONS
 // ========================================================================

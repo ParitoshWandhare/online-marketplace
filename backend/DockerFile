@@ -1,22 +1,37 @@
-# Use an official Node.js runtime as the base image. 'alpine' is a lightweight version.
+# Use official Node.js LTS version (more stable than alpine for production)
 FROM node:20-alpine
 
-# Set the working directory within the container.
+# Set working directory
 WORKDIR /app
 
-# Copy package.json and package-lock.json first to leverage Docker's layer caching.
+# Install production dependencies for native modules (bcrypt, etc.)
+RUN apk add --no-cache python3 make g++
+
+# Copy package files first (for better layer caching)
 COPY package*.json ./
 
-# Install only production dependencies to keep the image size small.
-RUN npm install --only=production
+# Install dependencies
+# Use --production flag but ensure bcrypt builds correctly
+RUN npm ci --only=production && \
+    npm cache clean --force
 
-# Copy the rest of your application's source code into the container.
+# Copy application source code
 COPY . .
 
-# Expose the port that your backend application listens on.
-# We'll use 8000 as defined in our main docker-compose.yml.
-EXPOSE 8000
+# Create a non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
 
-# Define the command to run your application.
-# You might need to change 'src/index.js' to your actual server entry point file (e.g., src/app.js, src/server.js).
-CMD [ "node", "src/index.js" ]
+# Switch to non-root user
+USER nodejs
+
+# Expose the port (should match your .env PORT)
+EXPOSE 4000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:4000/', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+
+# Start the application
+CMD ["node", "src/server.js"]

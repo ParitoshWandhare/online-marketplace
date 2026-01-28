@@ -1,12 +1,82 @@
-# Ignore the node_modules folder. Dependencies are installed inside the container.
+# Dependencies
 node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Ignore local environment variables.
+# Environment variables (IMPORTANT: these should come from Docker/K8s secrets)
 .env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
 
-# Ignore version control files.
+# Version control
 .git
 .gitignore
+.gitattributes
 
-# Ignore npm log files.
-npm-debug.log*
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.bak
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+.nyc_output/
+*.lcov
+
+# Build artifacts
+dist/
+build/
+.cache/
+
+# Logs
+logs/
+*.log
+
+# Database files (shouldn't be in container)
+*.sqlite
+*.db
+*.db-journal
+dump.rdb
+*.sql
+*.bak
+
+# Documentation
+README.md
+CHANGELOG.md
+*.md
+docs/
+
+# Docker files (no need to copy these into the image)
+Dockerfile
+.dockerignore
+docker-compose.yml
+docker-compose.*.yml
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# OS files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db

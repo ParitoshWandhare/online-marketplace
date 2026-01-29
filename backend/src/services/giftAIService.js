@@ -4,8 +4,8 @@ const FormData = require("form-data");
 const fs = require("fs");
 
 // AI Service URLs from environment variables
-const GIFT_AI_BASE_URL = process.env.GIFT_AI_SERVICE_URL || "http://localhost:8001";
-//const VISION_AI_BASE_URL = process.env.VISION_AI_SERVICE_URL || "http://localhost:8001";
+const GIFT_AI_BASE_URL = process.env.GIFT_AI_SERVICE_URL || "https://orchid-giftai-f6fxg6gwdbg0a2hd.centralindia-01.azurewebsites.net";
+//const VISION_AI_BASE_URL = process.env.VISION_AI_SERVICE_URL || "https://orchid-giftai-f6fxg6gwdbg0a2hd.centralindia-01.azurewebsites.net";
 
 // Timeout configuration
 const AI_REQUEST_TIMEOUT = 1200000; // 120 seconds

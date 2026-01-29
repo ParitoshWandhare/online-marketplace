@@ -448,12 +448,11 @@ exports.healthCheck = async (req, res) => {
       services: {
         gift_ai: {
           status: giftServiceHealthy ? "healthy" : "unhealthy",
-          url: process.env.GIFT_AI_SERVICE_URL || "http://localhost:8001",
+          url: process.env.GIFT_AI_SERVICE_URL || "Not configured",
         },
         vision_ai: {
           status: visionServiceHealthy ? "healthy" : "unhealthy",
-          //url: process.env.VISION_AI_SERVICE_URL || "http://localhost:8001",
-          url: process.env.GIFT_AI_SERVICE_URL || "http://localhost:8001",
+          url: process.env.VISION_AI_SERVICE_URL || process.env.GIFT_AI_SERVICE_URL || "Not configured",
         },
       },
       all_healthy: giftServiceHealthy && visionServiceHealthy,

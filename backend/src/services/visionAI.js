@@ -2,8 +2,11 @@
 const axios = require("axios");
 const FormData = require("form-data");
 
-const AI_BASE = process.env.AI_SERVICES_URL || "http://localhost:5001";
+// Use VISION_AI_SERVICE_URL instead of AI_SERVICES_URL
+const AI_BASE = process.env.AI_SERVICES_URL || process.env.VISION_AI_SERVICE_URL || "https://orchid-genai.azurewebsites.net/";
 const AI_API_KEY = process.env.AI_SERVICE_KEY || "";
+
+console.log(`🔧 Vision AI Service URL: ${AI_BASE}`);
 
 /**
  * Fetch raw bytes from an accessible URL (Cloudinary secure_url)
@@ -43,6 +46,8 @@ async function postImageToAI(endpoint, file, options = {}) {
   let filename = file?.originalname || `upload-${Date.now()}.jpg`;
   let contentType = file?.mimetype || "image/jpeg";
 
+  console.log(`🔧 Calling Vision AI: ${AI_BASE}${endpoint}`);
+
   if (file?.buffer) {
     buffer = file.buffer;
   } else {
@@ -79,6 +84,7 @@ async function postImageToAI(endpoint, file, options = {}) {
     });
     return resp.data;
   } catch (err) {
+    console.error(`❌ Vision AI Error for ${endpoint}:`, err?.response?.data || err.message);
     // Wrap error to include remote response if present
     const remote = err?.response?.data || err?.response?.statusText || err.message;
     throw new Error(`AI service request failed: ${JSON.stringify(remote)}`);

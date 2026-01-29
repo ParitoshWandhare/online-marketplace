@@ -7,6 +7,8 @@ const API_BASE_URL = import.meta.env.VITE_GIFT_AI_API_URL || `${import.meta.env.
 // Debug logging to see what URL is being used
 console.log('🎁 Gift AI Service URL:', API_BASE_URL);
 console.log('🎁 Environment VITE_GIFT_AI_API_URL:', import.meta.env.VITE_GIFT_AI_API_URL);
+console.log('🎁 Environment VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
+console.log('🎁 All environment variables:', import.meta.env);
 // ========================================================================
 // TYPE DEFINITIONS
 // ========================================================================

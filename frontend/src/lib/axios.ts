@@ -1,10 +1,11 @@
 import axios from 'axios';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000/api/v1';
+const baseURL = import.meta.env.VITE_API_BASE_URL || 'https://orchid-backend-ewfkdwcdf6g5abg2.centralindia-01.azurewebsites.net/api/v1';
 
 // Debug logging to see what URL is being used
 console.log('🔧 API Base URL:', baseURL);
 console.log('🔧 Environment VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
+console.log('🔧 All environment variables:', import.meta.env);
 
 const apiClient = axios.create({
   baseURL,

@@ -31,7 +31,13 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL, // e.g., http://localhost:5173
+    origin: [
+      process.env.FRONTEND_URL?.replace(/\/$/, ''), // Remove trailing slash if present
+      process.env.FRONTEND_URL, // Keep original as fallback
+      'https://salmon-pond-08feb7200.6.azurestaticapps.net', // Explicit frontend URL
+      'http://localhost:5173', // Local development
+      'http://localhost:3000'  // Alternative local port
+    ].filter(Boolean), // Remove any undefined values
     credentials: true,                // allow cookies / auth headers
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],

@@ -12,6 +12,9 @@ router.post(
   artworkController.createArtwork
 );
 
+// my artworks
+router.get("/me/my-artworks", authMiddleware, artworkController.myArtworks);
+
 // fetch all artworks
 router.get("/", authMiddleware, artworkController.getAllArtworks);
 
@@ -20,9 +23,6 @@ router.get("/:id", authMiddleware, artworkController.getArtworkById);
 
 // delete artwork
 router.delete("/:id", authMiddleware, artworkController.deleteArtwork);
-
-// my artworks
-router.get("/me/my-artworks", authMiddleware, artworkController.myArtworks);
 
 // edit artwork
 router.put("/:id", authMiddleware, artworkController.updateArtwork);

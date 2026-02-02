@@ -81,6 +81,16 @@ app.get("/", (req, res) => {
   });
 });
 
+// Dedicated health endpoint
+app.get("/health", (req, res) => {
+  return res.json({
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || "development"
+  });
+});
+
 // Test endpoint for CORS
 app.get("/api/v1/test", (req, res) => {
   res.json({

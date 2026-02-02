@@ -301,6 +301,15 @@ async def search_similar_gifts(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
+# Alias endpoint for backward compatibility
+@app.get("/search", response_model=TextSearchResponse)
+async def search_alias(
+    query: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=50)
+):
+    """Alias for search_similar_gifts (GET method)"""
+    return await search_similar_gifts(query, limit)
+
 @app.post("/refresh_vector_store")
 async def refresh_vector_store():
     """Refresh Vector Store (Admin)"""

@@ -1,14 +1,38 @@
 // frontend/src/services/giftAi.ts
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
 
-//const API_BASE_URL = import.meta.env.VITE_GIFT_AI_API_URL || 'http://localhost:4000/api/v1/gift-ai';
-const API_BASE_URL = import.meta.env.VITE_GIFT_AI_API_URL || `${import.meta.env.VITE_API_BASE_URL}/gift-ai`;
+// Fixed URL construction with proper fallbacks and validation
+const getApiBaseUrl = () => {
+  const envApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+  const envGiftAiUrl = import.meta.env.VITE_GIFT_AI_API_URL;
+  
+  // If we have the specific gift AI URL, use it
+  if (envGiftAiUrl && envGiftAiUrl !== 'undefined' && envGiftAiUrl.startsWith('http')) {
+    return envGiftAiUrl;
+  }
+  
+  // If we have the base API URL, append gift-ai
+  if (envApiBaseUrl && envApiBaseUrl !== 'undefined' && envApiBaseUrl.startsWith('http')) {
+    return `${envApiBaseUrl}/gift-ai`;
+  }
+  
+  // Fallback to hardcoded URL
+  return 'https://orchid-backend-ewfkdwcdf6g5abg2.centralindia-01.azurewebsites.net/api/v1/gift-ai';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 // Debug logging to see what URL is being used
 console.log('🎁 Gift AI Service URL:', API_BASE_URL);
 console.log('🎁 Environment VITE_GIFT_AI_API_URL:', import.meta.env.VITE_GIFT_AI_API_URL);
 console.log('🎁 Environment VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
 console.log('🎁 All environment variables:', import.meta.env);
+
+// Validate the final URL
+if (!API_BASE_URL || API_BASE_URL.includes('undefined')) {
+  console.error('❌ Invalid API_BASE_URL detected:', API_BASE_URL);
+  throw new Error('Gift AI Service URL is not properly configured');
+}
 // ========================================================================
 // TYPE DEFINITIONS
 // ========================================================================

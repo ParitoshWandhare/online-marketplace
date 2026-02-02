@@ -1,11 +1,29 @@
 import axios from 'axios';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'https://orchid-backend-ewfkdwcdf6g5abg2.centralindia-01.azurewebsites.net/api/v1';
+const getBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  
+  // Check if environment variable exists and is valid
+  if (envUrl && envUrl !== 'undefined' && envUrl.startsWith('http')) {
+    return envUrl;
+  }
+  
+  // Fallback to hardcoded URL
+  return 'https://orchid-backend-ewfkdwcdf6g5abg2.centralindia-01.azurewebsites.net/api/v1';
+};
+
+const baseURL = getBaseUrl();
 
 // Debug logging to see what URL is being used
 console.log('🔧 API Base URL:', baseURL);
 console.log('🔧 Environment VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
 console.log('🔧 All environment variables:', import.meta.env);
+
+// Validate the final URL
+if (!baseURL || baseURL.includes('undefined')) {
+  console.error('❌ Invalid baseURL detected:', baseURL);
+  throw new Error('API Base URL is not properly configured');
+}
 
 const apiClient = axios.create({
   baseURL,

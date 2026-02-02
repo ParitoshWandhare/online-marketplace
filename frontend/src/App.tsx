@@ -6,6 +6,7 @@ import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
 import { UIProvider } from "@/context/UIContext";
 import { AppRoutes } from "@/routes/AppRoutes";
+import "@/utils/envCheck"; // Import environment validation
 
 const queryClient = new QueryClient();
 

@@ -7,7 +7,6 @@ Fixed: Proper indentation and error handling
 import os
 import logging
 import json
-import requests
 from typing import List, Dict, Any
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -55,44 +54,13 @@ class GiftBundleService:
             logger.error(f"Gemini failed: {e}")
             raise
 
-    def _call_ollama(self, prompt: str) -> Dict[str, Any]:
-        """Call Ollama API"""
-        try:
-            response = requests.post(
-                'http://localhost:11434/api/generate',
-                json={
-                    'model': 'llama3.1',
-                    'prompt': prompt,
-                    'stream': False,
-                    'format': 'json'
-                },
-                timeout=60
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                response_text = result.get('response', '')
-                
-                if '```json' in response_text:
-                    response_text = response_text.split('```json')[1].split('```')[0]
-                
-                bundle_data = json.loads(response_text.strip())
-                logger.info("✅ Ollama generated bundles")
-                return bundle_data
-            else:
-                raise Exception(f"Ollama error: {response.status_code}")
-                
-        except Exception as e:
-            logger.error(f"Ollama failed: {e}")
-            raise
-
     async def generate_bundles(self, user_intent: str, items: List[Dict]) -> Dict[str, Any]:
         """
-        Generate bundles using Gemini → Ollama → Hardcoded fallback
+        Generate bundles using Gemini with hardcoded fallback (Ollama disabled for deployment)
         """
         logger.info(f"🎨 Generating bundles: '{user_intent}' with {len(items)} items")
         
-        from services.gift_prompt_templates import get_gift_bundle_prompt, get_fallback_prompt
+        from services.gift_prompt_templates import get_gift_bundle_prompt
         
         prompt = get_gift_bundle_prompt(user_intent, items)
         
@@ -104,31 +72,26 @@ class GiftBundleService:
                 raise Exception("No Gemini API key")
                 
         except Exception as e:
-            logger.warning(f"⚠️ Gemini failed, trying Ollama: {e}")
-            try:
-                fallback_prompt = get_fallback_prompt(user_intent, items)
-                result = self._call_ollama(fallback_prompt)
-            except Exception as ollama_error:
-                logger.error(f"❌ All LLMs failed: {ollama_error}")
-                # Hardcoded fallback (FIXED INDENTATION)
-                result = {
-                    "bundles": [
-                        {
-                            "bundle_name": "Curated Gift Selection",
-                            "description": f"Hand-picked items matching: {user_intent}",
-                            "items": [
-                                {
-                                    "title": item.get('title', 'Unknown'),
-                                    "reason": "Highly relevant to your needs",
-                                    "price": item.get('price', 0),
-                                    "category": item.get('category', 'General')
-                                }
-                                for item in items[:3]
-                            ],
-                            "total_price": sum(item.get('price', 0) for item in items[:3])
-                        }
-                    ]
-                }
+            logger.warning(f"⚠️ Gemini failed, using hardcoded fallback: {e}")
+            # Hardcoded fallback (Ollama disabled for deployment stability)
+            result = {
+                "bundles": [
+                    {
+                        "bundle_name": "Curated Gift Selection",
+                        "description": f"Hand-picked items matching: {user_intent}",
+                        "items": [
+                            {
+                                "title": item.get('title', 'Unknown'),
+                                "reason": "Highly relevant to your needs",
+                                "price": item.get('price', 0),
+                                "category": item.get('category', 'General')
+                            }
+                            for item in items[:3]
+                        ],
+                        "total_price": sum(item.get('price', 0) for item in items[:3])
+                    }
+                ]
+            }
         
         # Ensure proper structure
         if 'bundles' not in result:

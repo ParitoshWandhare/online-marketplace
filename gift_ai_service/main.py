@@ -49,7 +49,7 @@ logger = logging.getLogger("gift_ai.main")
 # VISION AI CLIENT
 # ========================================================================
 class VisionAIClient:
-    """Gemini Vision AI client with Ollama fallback"""
+    """Gemini Vision AI client (Ollama disabled for deployment stability)"""
     
     def __init__(self):
         self.gemini_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
@@ -70,18 +70,9 @@ class VisionAIClient:
             except Exception as e:
                 logger.error(f"Vision AI initialization failed: {e}")
         
-        self.ollama_available = self._check_ollama()
-    
-    def _check_ollama(self) -> bool:
-        try:
-            import requests
-            response = requests.get('http://localhost:11434/api/tags', timeout=5)
-            if response.status_code == 200:
-                models = response.json().get('models', [])
-                return any('llava' in m.get('name', '').lower() for m in models)
-        except:
-            pass
-        return False
+        # Ollama disabled for deployment stability
+        self.ollama_available = False
+        logger.info("Ollama disabled for deployment - using Gemini only")
     
     async def analyze_image_gemini(self, image_bytes: bytes, prompt: str) -> str:
         if not self.gemini_model:
@@ -91,35 +82,13 @@ class VisionAIClient:
         response = self.gemini_model.generate_content([prompt, image])
         return response.text
     
-    async def analyze_image_ollama(self, image_bytes: bytes, prompt: str) -> str:
-        if not self.ollama_available:
-            raise Exception("Ollama not available")
-        
-        import requests
-        base64_image = base64.b64encode(image_bytes).decode('utf-8')
-        
-        response = requests.post(
-            'http://localhost:11434/api/generate',
-            json={'model': 'llava', 'prompt': prompt, 'images': [base64_image], 'stream': False},
-            timeout=60
-        )
-        
-        if response.status_code == 200:
-            return response.json()['response']
-        raise Exception(f"Ollama error: {response.status_code}")
-    
     async def analyze_image(self, image_bytes: bytes, prompt: str) -> str:
         if self.gemini_model:
             try:
                 return await self.analyze_image_gemini(image_bytes, prompt)
             except Exception as e:
-                logger.warning(f"Gemini failed: {e}, trying Ollama...")
-        
-        if self.ollama_available:
-            try:
-                return await self.analyze_image_ollama(image_bytes, prompt)
-            except Exception as e:
-                logger.error(f"Ollama failed: {e}")
+                logger.error(f"Gemini failed: {e}")
+                raise Exception(f"Vision AI failed: {e}")
         
         raise Exception("No vision AI provider available")
 
@@ -247,6 +216,7 @@ async def health_check():
             "qdrant": settings.QDRANT_URL is not None and settings.QDRANT_URL != "",
             "gemini_api_key": settings.GEMINI_API_KEY is not None and settings.GEMINI_API_KEY != "",
             "vision_ai": vision_client is not None and vision_client.gemini_model is not None,
+            "ollama": "disabled_for_deployment"
         }
     }
 

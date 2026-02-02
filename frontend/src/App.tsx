@@ -7,6 +7,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import { UIProvider } from "@/context/UIContext";
 import { AppRoutes } from "@/routes/AppRoutes";
 import "@/utils/envCheck"; // Import environment validation
+import "@/utils/apiTest"; // Import API configuration test
 
 const queryClient = new QueryClient();
 

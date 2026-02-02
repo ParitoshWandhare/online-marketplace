@@ -1,38 +1,12 @@
 // frontend/src/services/giftAi.ts
 import axios, { AxiosInstance, AxiosResponse } from 'axios';
+import { API_CONFIG } from '@/config/api';
 
-// Fixed URL construction with proper fallbacks and validation
-const getApiBaseUrl = () => {
-  const envApiBaseUrl = import.meta.env.VITE_API_BASE_URL;
-  const envGiftAiUrl = import.meta.env.VITE_GIFT_AI_API_URL;
-  
-  // If we have the specific gift AI URL, use it
-  if (envGiftAiUrl && envGiftAiUrl !== 'undefined' && envGiftAiUrl.startsWith('http')) {
-    return envGiftAiUrl;
-  }
-  
-  // If we have the base API URL, append gift-ai
-  if (envApiBaseUrl && envApiBaseUrl !== 'undefined' && envApiBaseUrl.startsWith('http')) {
-    return `${envApiBaseUrl}/gift-ai`;
-  }
-  
-  // Fallback to hardcoded URL
-  return 'https://orchid-backend-ewfkdwcdf6g5abg2.centralindia-01.azurewebsites.net/api/v1/gift-ai';
-};
-
-const API_BASE_URL = getApiBaseUrl();
+// Use configuration from centralized config
+const API_BASE_URL = API_CONFIG.GIFT_AI_URL;
 
 // Debug logging to see what URL is being used
 console.log('🎁 Gift AI Service URL:', API_BASE_URL);
-console.log('🎁 Environment VITE_GIFT_AI_API_URL:', import.meta.env.VITE_GIFT_AI_API_URL);
-console.log('🎁 Environment VITE_API_BASE_URL:', import.meta.env.VITE_API_BASE_URL);
-console.log('🎁 All environment variables:', import.meta.env);
-
-// Validate the final URL
-if (!API_BASE_URL || API_BASE_URL.includes('undefined')) {
-  console.error('❌ Invalid API_BASE_URL detected:', API_BASE_URL);
-  throw new Error('Gift AI Service URL is not properly configured');
-}
 // ========================================================================
 // TYPE DEFINITIONS
 // ========================================================================
@@ -168,10 +142,10 @@ class GiftAIService {
   constructor() {
     this.api = axios.create({
       baseURL: API_BASE_URL,
-      timeout: 1200000,
+      timeout: API_CONFIG.DEFAULT_TIMEOUT,
       withCredentials: true,
-      headers: { 
-        'Content-Type': 'application/json' 
+      headers: {
+        'Content-Type': 'application/json'
       },
     });
   }
@@ -200,25 +174,25 @@ class GiftAIService {
     formData.append('image', imageFile);
 
     console.log('📸 Uploading image for bundle generation:', imageFile.name);
-    
+
     const res: AxiosResponse<GenerateBundleResponse> = await this.api.post(
       '/generate-bundle',
       formData,
       {
-        headers: { 
-          'Content-Type': 'multipart/form-data' 
+        headers: {
+          'Content-Type': 'multipart/form-data'
         },
-        timeout: 120000, // 120 seconds for image processing
+        timeout: API_CONFIG.UPLOAD_TIMEOUT, // 120 seconds for image processing
       }
     );
-    
+
     console.log('✅ Bundle generated:', res.data);
-    
+
     // Log warnings if present
     if (res.data.warnings && res.data.warnings.length > 0) {
       console.warn('⚠️ Bundle generation warnings:', res.data.warnings);
     }
-    
+
     return res.data;
   }
 
@@ -234,19 +208,19 @@ class GiftAIService {
     console.log(`🔍 Searching gifts for: "${query}" (limit: ${limit})`);
 
     const res: AxiosResponse<SearchResponse> = await this.api.get('/search', {
-      params: { 
-        query: query.trim(), 
-        limit 
+      params: {
+        query: query.trim(),
+        limit
       }
     });
 
     console.log('✅ Search results:', res.data);
-    
+
     // Log warnings if present
     if (res.data.warnings && res.data.warnings.length > 0) {
       console.warn('⚠️ Search warnings:', res.data.warnings);
     }
-    
+
     return res.data;
   }
 
@@ -259,20 +233,20 @@ class GiftAIService {
    * @private
    */
   private async callVisionEndpoint(
-    endpoint: string, 
+    endpoint: string,
     imageFile: File
   ): Promise<VisionResponse> {
     const formData = new FormData();
     formData.append('image', imageFile);
 
     console.log(`🔮 Vision AI → POST ${endpoint}`, imageFile.name);
-    
+
     const res: AxiosResponse<VisionResponse> = await this.api.post(
-      endpoint, 
-      formData, 
+      endpoint,
+      formData,
       {
-        headers: { 
-          'Content-Type': 'multipart/form-data' 
+        headers: {
+          'Content-Type': 'multipart/form-data'
         },
       }
     );
@@ -333,10 +307,10 @@ class GiftAIService {
   async refreshVectorStore(): Promise<RefreshVectorStoreResponse> {
     console.log('🔄 Refreshing vector store...');
     const res: AxiosResponse<RefreshVectorStoreResponse> = await this.api.post(
-      '/refresh-vector-store', 
-      null, 
+      '/refresh-vector-store',
+      null,
       {
-        timeout: 300000, // 5 minutes
+        timeout: API_CONFIG.ADMIN_TIMEOUT, // 5 minutes
       }
     );
     console.log('✅ Vector store refreshed:', res.data);
@@ -386,17 +360,17 @@ class GiftAIService {
       return response.data;
     } catch (error) {
       if (axios.isAxiosError(error)) {
-        const errorMessage = 
-          error.response?.data?.message || 
-          error.response?.data?.error || 
+        const errorMessage =
+          error.response?.data?.message ||
+          error.response?.data?.error ||
           error.message;
-        
+
         console.error('Gift AI Service Error:', {
           status: error.response?.status,
           message: errorMessage,
           endpoint: error.config?.url,
         });
-        
+
         throw new Error(errorMessage);
       }
       throw error;

@@ -35,6 +35,7 @@ router.get("/health", giftAIController.healthCheck);
 /**
  * Generate gift bundle from image
  * POST /api/v1/gift-ai/generate-bundle
+ * POST /api/v1/gift-ai/generate_gift_bundle (alias for compatibility)
  * Body: multipart/form-data with 'image' file
  */
 router.post(
@@ -43,11 +44,22 @@ router.post(
   giftAIController.generateGiftBundle
 );
 
+// Add alias route for underscore version
+router.post(
+  "/generate_gift_bundle",
+  upload.single("image"),
+  giftAIController.generateGiftBundle
+);
+
 /**
  * Search similar gifts by text query
  * GET /api/v1/gift-ai/search?query=birthday+gift&limit=10
+ * POST /api/v1/gift-ai/search_similar_gifts (alias for compatibility)
  */
 router.get("/search", giftAIController.searchSimilarGifts);
+
+// Add alias route for underscore version
+router.post("/search_similar_gifts", giftAIController.searchSimilarGifts);
 
 // ========================================================================
 // VISION AI ENDPOINTS
@@ -56,6 +68,7 @@ router.get("/search", giftAIController.searchSimilarGifts);
 /**
  * Analyze craft type from image
  * POST /api/v1/gift-ai/analyze-craft
+ * POST /api/v1/gift-ai/analyze_craft (alias for compatibility)
  */
 router.post(
   "/analyze-craft",
@@ -63,9 +76,17 @@ router.post(
   giftAIController.analyzeCraft
 );
 
+// Add alias route for underscore version
+router.post(
+  "/analyze_craft",
+  upload.single("image"),
+  giftAIController.analyzeCraft
+);
+
 /**
  * Analyze quality from image
  * POST /api/v1/gift-ai/analyze-quality
+ * POST /api/v1/gift-ai/analyze_quality (alias for compatibility)
  */
 router.post(
   "/analyze-quality",
@@ -73,9 +94,17 @@ router.post(
   giftAIController.analyzeQuality
 );
 
+// Add alias route for underscore version
+router.post(
+  "/analyze_quality",
+  upload.single("image"),
+  giftAIController.analyzeQuality
+);
+
 /**
  * Estimate price from image
  * POST /api/v1/gift-ai/estimate-price
+ * POST /api/v1/gift-ai/estimate_price (alias for compatibility)
  */
 router.post(
   "/estimate-price",
@@ -83,9 +112,17 @@ router.post(
   giftAIController.estimatePrice
 );
 
+// Add alias route for underscore version
+router.post(
+  "/estimate_price",
+  upload.single("image"),
+  giftAIController.estimatePrice
+);
+
 /**
  * Detect fraud indicators
  * POST /api/v1/gift-ai/detect-fraud
+ * POST /api/v1/gift-ai/detect_fraud (alias for compatibility)
  */
 router.post(
   "/detect-fraud",
@@ -93,12 +130,27 @@ router.post(
   giftAIController.detectFraud
 );
 
+// Add alias route for underscore version
+router.post(
+  "/detect_fraud",
+  upload.single("image"),
+  giftAIController.detectFraud
+);
+
 /**
  * Detect suitable occasion
  * POST /api/v1/gift-ai/detect-occasion
+ * POST /api/v1/gift-ai/detect_occasion (alias for compatibility)
  */
 router.post(
   "/detect-occasion",
+  upload.single("image"),
+  giftAIController.detectOccasion
+);
+
+// Add alias route for underscore version
+router.post(
+  "/detect_occasion",
   upload.single("image"),
   giftAIController.detectOccasion
 );
@@ -110,6 +162,7 @@ router.post(
 /**
  * Refresh vector store (sync MongoDB → Qdrant)
  * POST /api/v1/gift-ai/refresh-vector-store
+ * POST /api/v1/gift-ai/refresh_vector_store (alias for compatibility)
  * Requires: Authentication
  */
 router.post(
@@ -118,9 +171,17 @@ router.post(
   giftAIController.refreshVectorStore
 );
 
+// Add alias route for underscore version
+router.post(
+  "/refresh_vector_store",
+  isAuthenticated,
+  giftAIController.refreshVectorStore
+);
+
 /**
  * Get vector store information
  * GET /api/v1/gift-ai/vector-store-info
+ * GET /api/v1/gift-ai/vector_store_info (alias for compatibility)
  * Requires: Authentication
  */
 router.get(
@@ -129,13 +190,28 @@ router.get(
   giftAIController.getVectorStoreInfo
 );
 
+// Add alias route for underscore version
+router.get(
+  "/vector_store_info",
+  isAuthenticated,
+  giftAIController.getVectorStoreInfo
+);
+
 /**
  * Index a specific artwork
  * POST /api/v1/gift-ai/index-artwork/:artworkId
+ * POST /api/v1/gift-ai/index_artwork/:artworkId (alias for compatibility)
  * Requires: Authentication
  */
 router.post(
   "/index-artwork/:artworkId",
+  isAuthenticated,
+  giftAIController.indexArtwork
+);
+
+// Add alias route for underscore version
+router.post(
+  "/index_artwork/:artworkId",
   isAuthenticated,
   giftAIController.indexArtwork
 );

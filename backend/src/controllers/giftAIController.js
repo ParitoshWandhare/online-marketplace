@@ -70,10 +70,12 @@ exports.generateGiftBundle = async (req, res) => {
 /**
  * Search similar gifts by text query
  * GET /api/v1/gift-ai/search?query=...&limit=10
+ * POST /api/v1/gift-ai/search_similar_gifts (for compatibility)
  */
 exports.searchSimilarGifts = async (req, res) => {
   try {
-    const { query, limit } = req.query;
+    // Handle both GET and POST requests
+    const { query, limit } = req.method === 'GET' ? req.query : req.body;
 
     if (!query || query.trim().length === 0) {
       return res.status(400).json({

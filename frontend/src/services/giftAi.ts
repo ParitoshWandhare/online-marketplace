@@ -594,17 +594,17 @@ class GiftAIService {
 
   /**
    * Generate gift bundle from uploaded image
-   * POST /generate_gift_bundle (FIXED: was /generate-bundle)
+   * POST /generate-bundle (primary endpoint)
    */
   async generateGiftBundle(imageFile: File): Promise<GenerateBundleResponse> {
     const formData = new FormData();
     formData.append('image', imageFile);
 
     console.log('📸 Uploading image for bundle generation:', imageFile.name);
-    console.log('📍 Full URL:', `${API_BASE_URL}/generate_gift_bundle`);
+    console.log('📍 Full URL:', `${API_BASE_URL}/generate-bundle`);
 
     const res: AxiosResponse<GenerateBundleResponse> = await this.api.post(
-      '/generate_gift_bundle',  // FIXED: Changed from /generate-bundle
+      '/generate-bundle',  // FIXED: Use hyphen version (backend supports both)
       formData,
       {
         headers: {
@@ -626,7 +626,7 @@ class GiftAIService {
 
   /**
    * Search similar gifts by text query
-   * POST /search_similar_gifts (FIXED: was /search)
+   * GET /search?query=...&limit=10 (primary endpoint)
    */
   async searchSimilarGifts(query: string, limit = 10): Promise<SearchResponse> {
     if (!query || query.trim().length === 0) {
@@ -635,7 +635,7 @@ class GiftAIService {
 
     console.log(`🔍 Searching gifts for: "${query}" (limit: ${limit})`);
 
-    const res: AxiosResponse<SearchResponse> = await this.api.post('/search_similar_gifts', null, {
+    const res: AxiosResponse<SearchResponse> = await this.api.get('/search', {
       params: {
         query: query.trim(),
         limit
@@ -685,42 +685,42 @@ class GiftAIService {
 
   /**
    * Analyze craft type from image
-   * POST /analyze_craft (FIXED: was /analyze-craft)
+   * POST /analyze-craft (primary endpoint)
    */
   async analyzeCraft(imageFile: File): Promise<VisionResponse> {
-    return this.callVisionEndpoint('/analyze_craft', imageFile);
+    return this.callVisionEndpoint('/analyze-craft', imageFile);
   }
 
   /**
    * Analyze quality and craftsmanship
-   * POST /analyze_quality (FIXED: was /analyze-quality)
+   * POST /analyze-quality (primary endpoint)
    */
   async analyzeQuality(imageFile: File): Promise<VisionResponse> {
-    return this.callVisionEndpoint('/analyze_quality', imageFile);
+    return this.callVisionEndpoint('/analyze-quality', imageFile);
   }
 
   /**
    * Estimate price from image
-   * POST /estimate_price (FIXED: was /estimate-price)
+   * POST /estimate-price (primary endpoint)
    */
   async estimatePrice(imageFile: File): Promise<VisionResponse> {
-    return this.callVisionEndpoint('/estimate_price', imageFile);
+    return this.callVisionEndpoint('/estimate-price', imageFile);
   }
 
   /**
    * Detect fraud indicators
-   * POST /detect_fraud (FIXED: was /detect-fraud)
+   * POST /detect-fraud (primary endpoint)
    */
   async detectFraud(imageFile: File): Promise<VisionResponse> {
-    return this.callVisionEndpoint('/detect_fraud', imageFile);
+    return this.callVisionEndpoint('/detect-fraud', imageFile);
   }
 
   /**
    * Detect suitable occasion
-   * POST /detect_occasion (FIXED: was /detect-occasion)
+   * POST /detect-occasion (primary endpoint)
    */
   async detectOccasion(imageFile: File): Promise<VisionResponse> {
-    return this.callVisionEndpoint('/detect_occasion', imageFile);
+    return this.callVisionEndpoint('/detect-occasion', imageFile);
   }
 
   // ========================================================================
@@ -729,13 +729,13 @@ class GiftAIService {
 
   /**
    * Refresh vector store (sync MongoDB → Qdrant)
-   * POST /refresh_vector_store (FIXED: was /refresh-vector-store)
+   * POST /refresh-vector-store (primary endpoint)
    * Requires: Authentication
    */
   async refreshVectorStore(): Promise<RefreshVectorStoreResponse> {
     console.log('🔄 Refreshing vector store...');
     const res: AxiosResponse<RefreshVectorStoreResponse> = await this.api.post(
-      '/refresh_vector_store',
+      '/refresh-vector-store',
       null,
       {
         timeout: API_CONFIG.ADMIN_TIMEOUT, // 5 minutes
@@ -747,13 +747,13 @@ class GiftAIService {
 
   /**
    * Get vector store information
-   * GET /vector_store_info (FIXED: was /vector-store-info)
+   * GET /vector-store-info (primary endpoint)
    * Requires: Authentication
    */
   async getVectorStoreInfo(): Promise<VectorStoreInfoResponse> {
     console.log('📊 Fetching vector store info...');
     const res: AxiosResponse<VectorStoreInfoResponse> = await this.api.get(
-      '/vector_store_info'
+      '/vector-store-info'
     );
     console.log('✅ Vector store info:', res.data);
     return res.data;
@@ -761,13 +761,13 @@ class GiftAIService {
 
   /**
    * Index a specific artwork into vector store
-   * POST /index_artwork/:artworkId (FIXED: was /index-artwork)
+   * POST /index-artwork/:artworkId (primary endpoint)
    * Requires: Authentication
    */
   async indexArtwork(artworkId: string): Promise<IndexArtworkResponse> {
     console.log(`📥 Indexing artwork: ${artworkId}`);
     const res: AxiosResponse<IndexArtworkResponse> = await this.api.post(
-      `/index_artwork/${artworkId}`
+      `/index-artwork/${artworkId}`
     );
     console.log('✅ Artwork indexed:', res.data);
     return res.data;

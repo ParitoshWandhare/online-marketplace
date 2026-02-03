@@ -33,23 +33,30 @@ app.use(cookieParser());
 // ------------------- CORS -------------------
 
 const allowedOrigins = [
-  process.env.FRONTEND_URL
+  process.env.FRONTEND_URL,
+  'https://salmon-pond-08feb7200.6.azurestaticapps.net', // Explicit frontend URL
+  'http://localhost:3000', // Local development
+  'http://localhost:5173', // Vite dev server
+  'https://localhost:3000',
+  'https://localhost:5173'
 ];
 
 app.use(cors({
   origin: function (origin, callback) {
+    // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     } else {
       console.log("❌ CORS blocked origin:", origin);
+      console.log("✅ Allowed origins:", allowedOrigins);
       return callback(new Error("Not allowed by CORS"));
     }
   },
   credentials: true,
-  methods: ["GET","POST","PUT","DELETE","PATCH","OPTIONS"],
-  allowedHeaders: ["Content-Type","Authorization"],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
 }));
 
 app.options("*", cors());
@@ -115,7 +122,7 @@ app.use("*", (req, res) => {
   console.log(`   *    /api/v1/cart/*`);
   console.log(`   *    /api/v1/vision/*`);
   console.log(`   *    /api/v1/gift-ai/*`);
-  
+
   return res.status(404).json({
     success: false,
     message: `Route ${req.method} ${req.originalUrl} not found`,
@@ -123,7 +130,7 @@ app.use("*", (req, res) => {
       "GET /",
       "GET /api/v1/test",
       "/api/v1/auth/*",
-      "/api/v1/user/*", 
+      "/api/v1/user/*",
       "/api/v1/artworks/*",
       "/api/v1/order/*",
       "/api/v1/like/*",

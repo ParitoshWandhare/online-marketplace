@@ -17,7 +17,7 @@ async function postImage<T = any>(endpoint: string, imageFile: File | Blob): Pro
   try {
     const response = await apiClient.post(endpoint, formData, {
       headers: { "Content-Type": "multipart/form-data" },
-      timeout: 30000,
+      timeout: 120000,
     });
     return { success: true, data: response.data };
   } catch (err: any) {

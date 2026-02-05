@@ -80,7 +80,7 @@
 //   try {
 //     const resp = await axios.post(url, form, {
 //       headers,
-//       timeout: 30000, // 30s
+//       timeout: 120000, // 120s
 //     });
 //     return resp.data;
 //   } catch (err) {
@@ -122,7 +122,7 @@ async function _fetchBytesFromUrl(url) {
   try {
     const resp = await axios.get(url, {
       responseType: "arraybuffer",
-      timeout: 30000, // 30s timeout
+      timeout: 120000, // 120s timeout
     });
     return Buffer.from(resp.data);
   } catch (error) {

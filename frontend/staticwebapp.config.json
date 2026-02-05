@@ -5,6 +5,11 @@
             "allowedRoles": [
                 "anonymous"
             ]
+        },
+        {
+            "route": "/*",
+            "serve": "/index.html",
+            "statusCode": 200
         }
     ],
     "navigationFallback": {
@@ -13,7 +18,8 @@
             "/images/*.{png,jpg,gif,ico,svg}",
             "/css/*",
             "/js/*",
-            "/api/*"
+            "/api/*",
+            "*.{css,js,map,ico,png,jpg,gif,svg}"
         ]
     },
     "mimeTypes": {
@@ -31,5 +37,10 @@
         "Cache-Control": "no-cache, no-store, must-revalidate",
         "Pragma": "no-cache",
         "Expires": "0"
+    },
+    "responseOverrides": {
+        "404": {
+            "rewrite": "/index.html"
+        }
     }
 }

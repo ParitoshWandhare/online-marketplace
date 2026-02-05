@@ -161,14 +161,45 @@ async def lifespan(app: FastAPI):
     logger.info(f"Qdrant: {settings.QDRANT_URL}")
     logger.info(f"LLM: {settings.LLM_MODEL}")
     
+    startup_errors = []
+    
     try:
+        # Initialize orchestrator
+        logger.info("Initializing orchestrator...")
         orchestrator = GiftOrchestrator()
+        
+        # Connect to databases
+        logger.info("Connecting to databases...")
         await orchestrator.vector_store.connect()
+        logger.info("✅ Databases connected")
+        
+        # Initialize vision client
+        logger.info("Initializing vision client...")
         vision_client = VisionAIClient()
-        logger.info("Service initialized successfully")
+        logger.info("✅ Vision client initialized")
+        
+        logger.info("🚀 Service initialized successfully")
+        
     except Exception as e:
-        logger.error(f"Startup failed: {e}")
+        error_msg = f"Startup failed: {e}"
+        logger.error(f"❌ {error_msg}")
+        startup_errors.append(error_msg)
         traceback.print_exc()
+        
+        # Continue with partial initialization for debugging
+        if not orchestrator:
+            try:
+                orchestrator = GiftOrchestrator()
+                logger.info("⚠️ Orchestrator initialized without database connections")
+            except Exception as e2:
+                logger.error(f"❌ Failed to initialize orchestrator: {e2}")
+        
+        if not vision_client:
+            try:
+                vision_client = VisionAIClient()
+                logger.info("⚠️ Vision client initialized with potential issues")
+            except Exception as e2:
+                logger.error(f"❌ Failed to initialize vision client: {e2}")
     
     yield
     
@@ -177,7 +208,7 @@ async def lifespan(app: FastAPI):
     if orchestrator:
         try:
             await orchestrator.vector_store.close()
-            logger.info("Connections closed")
+            logger.info("✅ Connections closed")
         except Exception as e:
             logger.warning(f"Shutdown warning: {e}")
 
@@ -203,22 +234,80 @@ app.add_middleware(
 # ========================================================================
 # HEALTH CHECK
 # ========================================================================
+@app.get("/")
+async def root():
+    """Root endpoint for basic connectivity test"""
+    return {
+        "service": "unified-gift-ai",
+        "version": "3.0.0",
+        "status": "running",
+        "message": "Gift AI Service is operational",
+        "endpoints": [
+            "/health",
+            "/docs",
+            "/generate_gift_bundle",
+            "/search_similar_gifts",
+            "/refresh_vector_store"
+        ]
+    }
+
 @app.get("/health")
 async def health_check():
-    """Service health check"""
-    return {
+    """Service health check with detailed diagnostics"""
+    health_status = {
         "status": "healthy",
         "service": "unified-gift-ai",
         "version": "3.0.0",
         "components": {
             "orchestrator": orchestrator is not None,
-            "mongodb": settings.MONGODB_URL is not None and settings.MONGODB_URL != "",
-            "qdrant": settings.QDRANT_URL is not None and settings.QDRANT_URL != "",
+            "mongodb": False,
+            "qdrant": False,
             "gemini_api_key": settings.GEMINI_API_KEY is not None and settings.GEMINI_API_KEY != "",
-            "vision_ai": vision_client is not None and vision_client.gemini_model is not None,
+            "vision_ai": vision_client is not None,
             "ollama": "disabled_for_deployment"
-        }
+        },
+        "errors": []
     }
+    
+    # Test MongoDB connection
+    if orchestrator and orchestrator.vector_store.mongo_collection:
+        try:
+            # Simple ping test
+            await orchestrator.vector_store.mongo_collection.find_one({}, {"_id": 1})
+            health_status["components"]["mongodb"] = True
+        except Exception as e:
+            health_status["components"]["mongodb"] = False
+            health_status["errors"].append(f"MongoDB: {str(e)}")
+    
+    # Test Qdrant connection
+    if orchestrator and orchestrator.vector_store.qdrant_client:
+        try:
+            orchestrator.vector_store.qdrant_client.get_collections()
+            health_status["components"]["qdrant"] = True
+        except Exception as e:
+            health_status["components"]["qdrant"] = False
+            health_status["errors"].append(f"Qdrant: {str(e)}")
+    
+    # Test Gemini
+    if vision_client and vision_client.gemini_model:
+        try:
+            # Simple test generation
+            test_response = vision_client.gemini_model.generate_content("Say 'OK'")
+            if test_response.text:
+                health_status["components"]["vision_ai"] = True
+        except Exception as e:
+            health_status["components"]["vision_ai"] = False
+            health_status["errors"].append(f"Gemini: {str(e)}")
+    
+    # Determine overall status
+    critical_components = ["orchestrator", "mongodb", "qdrant", "gemini_api_key"]
+    if not all(health_status["components"][comp] for comp in critical_components):
+        health_status["status"] = "degraded"
+    
+    if health_status["errors"]:
+        health_status["status"] = "unhealthy" if len(health_status["errors"]) > 2 else "degraded"
+    
+    return health_status
 
 # ========================================================================
 # GIFT AI ENDPOINTS (Recommendation Engine)

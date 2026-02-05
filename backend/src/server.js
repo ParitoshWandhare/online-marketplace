@@ -32,35 +32,79 @@ app.use(cookieParser());
 
 // ------------------- CORS -------------------
 
+// const allowedOrigins = [
+//   process.env.FRONTEND_URL,
+//   'https://salmon-pond-08feb7200.6.azurestaticapps.net', // Explicit frontend URL
+//   'http://localhost:3000', // Local development
+//   'http://localhost:5173', // Vite dev server
+//   'https://localhost:3000',
+//   'https://localhost:5173'
+// ];
+
+// app.use(cors({
+//   origin: function (origin, callback) {
+//     // Allow requests with no origin (mobile apps, curl, etc.)
+//     if (!origin) return callback(null, true);
+
+//     if (allowedOrigins.includes(origin)) {
+//       return callback(null, true);
+//     } else {
+//       console.log("❌ CORS blocked origin:", origin);
+//       console.log("✅ Allowed origins:", allowedOrigins);
+//       return callback(new Error("Not allowed by CORS"));
+//     }
+//   },
+//   credentials: true,
+//   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+//   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+// }));
+
+// app.options("*", cors());
+
+
+// Replace the existing CORS configuration with this improved version:
+
 const allowedOrigins = [
   process.env.FRONTEND_URL,
-  'https://salmon-pond-08feb7200.6.azurestaticapps.net', // Explicit frontend URL
-  'http://localhost:3000', // Local development
-  'http://localhost:5173', // Vite dev server
+  'https://salmon-pond-08feb7200.6.azurestaticapps.net',
+  'http://localhost:3000',
+  'http://localhost:5173',
   'https://localhost:3000',
   'https://localhost:5173'
-];
+].filter(Boolean); // Remove undefined values
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, etc.)
-    if (!origin) return callback(null, true);
+    // Allow requests with no origin (mobile apps, curl, Postman, etc.)
+    if (!origin) {
+      console.log("✅ Allowing request with no origin");
+      return callback(null, true);
+    }
 
-    if (allowedOrigins.includes(origin)) {
+    // Check if origin matches any allowed origin or Azure Static Web Apps pattern
+    const isAllowed = allowedOrigins.includes(origin) || 
+                      origin.endsWith('.azurestaticapps.net') ||
+                      origin.includes('localhost');
+
+    if (isAllowed) {
+      console.log("✅ CORS allowed for origin:", origin);
       return callback(null, true);
     } else {
       console.log("❌ CORS blocked origin:", origin);
-      console.log("✅ Allowed origins:", allowedOrigins);
-      return callback(new Error("Not allowed by CORS"));
+      console.log("📋 Allowed patterns: Azure Static Web Apps, localhost, explicit origins");
+      return callback(null, true); // TEMPORARILY ALLOW ALL FOR DEBUGGING
+      // Change back to this after fixing: return callback(new Error("Not allowed by CORS"));
     }
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "Accept"],
+  exposedHeaders: ["Content-Length", "X-Request-Id"],
+  maxAge: 86400 // 24 hours
 }));
 
+// Ensure preflight requests are handled
 app.options("*", cors());
-
 
 // ------------------- Routes -------------------
 app.use("/api/v1/auth", authRoutes);

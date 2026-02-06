@@ -796,10 +796,11 @@ class VisionAIClient:
             try:
                 genai.configure(api_key=self.gemini_api_key)
                 
-                # Try multiple model versions
+                # Try multiple model versions - use correct model names
                 model_names = [
-                    'gemini-2.0-flash-exp',
+                    'gemini-1.5-flash-latest',
                     'gemini-1.5-flash',
+                    'gemini-1.5-pro-latest',
                     'gemini-1.5-pro',
                     'gemini-pro-vision'
                 ]

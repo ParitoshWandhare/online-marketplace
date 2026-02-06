@@ -796,13 +796,23 @@ class VisionAIClient:
             try:
                 genai.configure(api_key=self.gemini_api_key)
                 
-                # Try multiple model versions - use correct model names
+                # List available models first
+                try:
+                    available_models = genai.list_models()
+                    model_names_available = [m.name for m in available_models if 'generateContent' in m.supported_generation_methods]
+                    logger.info(f"📋 Available Gemini models: {[m.replace('models/', '') for m in model_names_available]}")
+                except Exception as e:
+                    logger.warning(f"Could not list models: {e}")
+                    model_names_available = []
+                
+                # Try models in priority order - based on your available models
                 model_names = [
-                    'gemini-1.5-flash-latest',
-                    'gemini-1.5-flash',
-                    'gemini-1.5-pro-latest',
-                    'gemini-1.5-pro',
-                    'gemini-pro-vision'
+                    'gemini-2.5-pro',           # Your best vision model
+                    'gemini-2.5-flash',         # Fast alternative
+                    'gemini-pro-latest',        # Latest pro version
+                    'gemini-2.0-flash',         # Stable flash
+                    'gemini-flash-latest',      # Latest flash
+                    'gemini-3-pro-preview',     # Preview pro
                 ]
                 
                 for name in model_names:
@@ -813,6 +823,17 @@ class VisionAIClient:
                     except Exception as e:
                         logger.debug(f"Model {name} not available: {e}")
                         continue
+                
+                # If priority models don't work, try first available model
+                if not self.gemini_model and model_names_available:
+                    for model_path in model_names_available:
+                        model_name = model_path.replace('models/', '')
+                        try:
+                            self.gemini_model = genai.GenerativeModel(model_name)
+                            logger.info(f"✅ Vision AI initialized with model: {model_name}")
+                            break
+                        except Exception as e:
+                            continue
                         
                 if not self.gemini_model:
                     logger.error("❌ No suitable Gemini model available")

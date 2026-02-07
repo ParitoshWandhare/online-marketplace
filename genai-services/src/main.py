@@ -124,14 +124,13 @@
 
 
 
-# genai-services/src/main.py
-
 """
 Updated FastAPI entrypoint for the Vision AI microservice with improved timeout handling.
 """
 
 import os
 import logging
+from datetime import datetime
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -150,12 +149,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("vision_ai.main")
 
-# FastAPI app
+# FastAPI app - FIXED: Removed invalid 'timeout' parameter
 app = FastAPI(
     title="Vision AI Microservice",
     description="AI-powered vision endpoints",
-    version="1.0.0",
-    timeout=300  # 5 minutes global timeout
+    version="1.0.0"
 )
 
 # CORS - allow all origins for now
@@ -231,7 +229,7 @@ def health_check():
         "status": "Vision AI microservice is running",
         "env": ENV,
         "protected": bool(AI_SERVICE_KEY),
-        "timestamp": "2025-02-05"
+        "timestamp": datetime.utcnow().isoformat()  # FIXED: Dynamic timestamp
     }
 
 @app.get("/health")
@@ -241,7 +239,8 @@ def detailed_health():
         "status": "healthy",
         "service": "vision-ai",
         "version": "1.0.0",
-        "env": ENV
+        "env": ENV,
+        "timestamp": datetime.utcnow().isoformat()  # FIXED: Dynamic timestamp
     }
 
 @app.on_event("startup")

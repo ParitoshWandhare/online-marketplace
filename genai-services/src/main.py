@@ -126,11 +126,13 @@
 
 """
 Updated FastAPI entrypoint for the Vision AI microservice with improved timeout handling.
+Uses modern lifespan events instead of deprecated on_event.
 """
 
 import os
 import logging
 from datetime import datetime
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -149,11 +151,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger("vision_ai.main")
 
-# FastAPI app - FIXED: Removed invalid 'timeout' parameter
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for startup and shutdown events.
+    Replaces deprecated @app.on_event("startup") and @app.on_event("shutdown")
+    """
+    # Startup
+    logger.info("Starting Vision AI microservice (env=%s). API key enforcement: %s", 
+               ENV, bool(AI_SERVICE_KEY))
+    
+    yield  # Application runs here
+    
+    # Shutdown
+    logger.info("Shutting down Vision AI microservice")
+
+
+# FastAPI app with lifespan
 app = FastAPI(
     title="Vision AI Microservice",
     description="AI-powered vision endpoints",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 # CORS - allow all origins for now
@@ -229,7 +249,7 @@ def health_check():
         "status": "Vision AI microservice is running",
         "env": ENV,
         "protected": bool(AI_SERVICE_KEY),
-        "timestamp": datetime.utcnow().isoformat()  # FIXED: Dynamic timestamp
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 @app.get("/health")
@@ -240,14 +260,5 @@ def detailed_health():
         "service": "vision-ai",
         "version": "1.0.0",
         "env": ENV,
-        "timestamp": datetime.utcnow().isoformat()  # FIXED: Dynamic timestamp
+        "timestamp": datetime.utcnow().isoformat()
     }
-
-@app.on_event("startup")
-async def startup_event():
-    logger.info("Starting Vision AI microservice (env=%s). API key enforcement: %s", 
-               ENV, bool(AI_SERVICE_KEY))
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    logger.info("Shutting down Vision AI microservice")

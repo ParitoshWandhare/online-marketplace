@@ -1,744 +1,15 @@
-# # gift_ai_service/main.py
-# """
-# Unified Gift AI Service - Complete Integration
-# ==============================================
-# Combines Gift AI recommendation engine and Vision AI analysis in one service
-# Port: 8001 (serves both functionalities)
-# """
-
-# # ========================================================================
-# # CRITICAL: Load .env FIRST
-# # ========================================================================
-# import os
-# import io
-# import base64
-# from pathlib import Path
-# from dotenv import load_dotenv
-
-# env_path = Path(__file__).parent / ".env"
-# if env_path.exists():
-#     load_dotenv(dotenv_path=env_path, override=True)
-
-# # ========================================================================
-# # IMPORTS
-# # ========================================================================
-# import logging
-# import traceback
-# from typing import Dict, Any, List, Optional
-
-# from fastapi import FastAPI, UploadFile, File, HTTPException, Query
-# from fastapi.middleware.cors import CORSMiddleware
-# from pydantic import BaseModel
-# from contextlib import asynccontextmanager
-# from PIL import Image
-# import google.generativeai as genai
-
-# from core.orchestrator import GiftOrchestrator
-# from core.config import settings
-
-# # ========================================================================
-# # LOGGING
-# # ========================================================================
-# logging.basicConfig(
-#     level=logging.INFO,
-#     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
-# )
-# logger = logging.getLogger("gift_ai.main")
-
-# # ========================================================================
-# # VISION AI CLIENT
-# # ========================================================================
-# class VisionAIClient:
-#     """Gemini Vision AI client (Ollama disabled for deployment stability)"""
-    
-#     def __init__(self):
-#         self.gemini_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-#         self.gemini_model = None
-        
-#         if self.gemini_api_key:
-#             try:
-#                 genai.configure(api_key=self.gemini_api_key)
-#                 model_names = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-pro-latest']
-                
-#                 for name in model_names:
-#                     try:
-#                         self.gemini_model = genai.GenerativeModel(name)
-#                         logger.info(f"Vision AI initialized with: {name}")
-#                         break
-#                     except:
-#                         continue
-#             except Exception as e:
-#                 logger.error(f"Vision AI initialization failed: {e}")
-        
-#         # Ollama disabled for deployment stability
-#         self.ollama_available = False
-#         logger.info("Ollama disabled for deployment - using Gemini only")
-    
-#     async def analyze_image_gemini(self, image_bytes: bytes, prompt: str) -> str:
-#         if not self.gemini_model:
-#             raise Exception("Gemini not configured")
-        
-#         image = Image.open(io.BytesIO(image_bytes))
-#         response = self.gemini_model.generate_content([prompt, image])
-#         return response.text
-    
-#     async def analyze_image(self, image_bytes: bytes, prompt: str) -> str:
-#         if self.gemini_model:
-#             try:
-#                 return await self.analyze_image_gemini(image_bytes, prompt)
-#             except Exception as e:
-#                 logger.error(f"Gemini failed: {e}")
-#                 raise Exception(f"Vision AI failed: {e}")
-        
-#         raise Exception("No vision AI provider available")
-
-# # Helper function for JSON extraction
-# def extract_json_from_response(text: str) -> Dict[str, Any]:
-#     import json
-#     import re
-    
-#     json_match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
-#     if json_match:
-#         text = json_match.group(1)
-#     else:
-#         json_match = re.search(r'\{.*\}', text, re.DOTALL)
-#         if json_match:
-#             text = json_match.group(0)
-    
-#     try:
-#         return json.loads(text)
-#     except json.JSONDecodeError:
-#         logger.warning("Failed to parse JSON")
-#         return {"raw_response": text}
-
-# # ========================================================================
-# # PYDANTIC MODELS
-# # ========================================================================
-# class GiftBundle(BaseModel):
-#     bundle_name: str
-#     description: str
-#     items: List[Dict[str, Any]]
-#     total_price: Optional[float] = None
-
-# class ImageBundleResponse(BaseModel):
-#     bundle_id: str
-#     vision: Dict[str, Any]
-#     intent: Dict[str, Any]
-#     bundles: List[Dict[str, Any]]
-#     metadata: Dict[str, Any]
-#     error: Optional[str] = None
-
-# class TextSearchResponse(BaseModel):
-#     query: str
-#     bundles: List[Dict[str, Any]]
-#     metadata: Optional[Dict[str, Any]] = None
-#     error: Optional[str] = None
-
-# class ArtworkIndexRequest(BaseModel):
-#     mongo_id: str
-#     title: str
-#     description: str
-#     category: Optional[str] = "General"
-#     price: float
-#     tags: Optional[List[str]] = []
-
-# # ========================================================================
-# # GLOBAL INSTANCES
-# # ========================================================================
-# orchestrator: Optional[GiftOrchestrator] = None
-# vision_client: Optional[VisionAIClient] = None
-
-# # ========================================================================
-# # LIFECYCLE MANAGEMENT
-# # ========================================================================
-# @asynccontextmanager
-# async def lifespan(app: FastAPI):
-#     global orchestrator, vision_client
-    
-#     # Startup
-#     logger.info("Starting Unified Gift AI Service...")
-#     logger.info(f"MongoDB: {settings.DATABASE_NAME}.{settings.COLLECTION_NAME}")
-#     logger.info(f"Qdrant: {settings.QDRANT_URL}")
-#     logger.info(f"LLM: {settings.LLM_MODEL}")
-    
-#     startup_errors = []
-    
-#     try:
-#         # Initialize orchestrator
-#         logger.info("Initializing orchestrator...")
-#         orchestrator = GiftOrchestrator()
-        
-#         # Connect to databases
-#         logger.info("Connecting to databases...")
-#         await orchestrator.vector_store.connect()
-#         logger.info("✅ Databases connected")
-        
-#         # Initialize vision client
-#         logger.info("Initializing vision client...")
-#         vision_client = VisionAIClient()
-#         logger.info("✅ Vision client initialized")
-        
-#         logger.info("🚀 Service initialized successfully")
-        
-#     except Exception as e:
-#         error_msg = f"Startup failed: {e}"
-#         logger.error(f"❌ {error_msg}")
-#         startup_errors.append(error_msg)
-#         traceback.print_exc()
-        
-#         # Continue with partial initialization for debugging
-#         if not orchestrator:
-#             try:
-#                 orchestrator = GiftOrchestrator()
-#                 logger.info("⚠️ Orchestrator initialized without database connections")
-#             except Exception as e2:
-#                 logger.error(f"❌ Failed to initialize orchestrator: {e2}")
-        
-#         if not vision_client:
-#             try:
-#                 vision_client = VisionAIClient()
-#                 logger.info("⚠️ Vision client initialized with potential issues")
-#             except Exception as e2:
-#                 logger.error(f"❌ Failed to initialize vision client: {e2}")
-    
-#     yield
-    
-#     # Shutdown
-#     logger.info("Shutting down...")
-#     if orchestrator:
-#         try:
-#             await orchestrator.vector_store.close()
-#             logger.info("✅ Connections closed")
-#         except Exception as e:
-#             logger.warning(f"Shutdown warning: {e}")
-
-# # ========================================================================
-# # FASTAPI APP
-# # ========================================================================
-# app = FastAPI(
-#     title="Unified Gift AI Service",
-#     description="Complete GenAI gift recommendation and vision analysis system",
-#     version="3.0.0",
-#     docs_url="/docs",
-#     redoc_url="/redoc",
-#     lifespan=lifespan
-# )
-
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-# # ========================================================================
-# # HEALTH CHECK
-# # ========================================================================
-# @app.get("/")
-# async def root():
-#     """Root endpoint for basic connectivity test"""
-#     return {
-#         "service": "unified-gift-ai",
-#         "version": "3.0.0",
-#         "status": "running",
-#         "message": "Gift AI Service is operational",
-#         "endpoints": [
-#             "/health",
-#             "/docs",
-#             "/generate_gift_bundle",
-#             "/search_similar_gifts",
-#             "/refresh_vector_store"
-#         ]
-#     }
-
-# @app.get("/health")
-# async def health_check():
-#     """Service health check with detailed diagnostics"""
-#     health_status = {
-#         "status": "healthy",
-#         "service": "unified-gift-ai",
-#         "version": "3.0.0",
-#         "components": {
-#             "orchestrator": orchestrator is not None,
-#             "mongodb": False,
-#             "qdrant": False,
-#             "gemini_api_key": settings.GEMINI_API_KEY is not None and settings.GEMINI_API_KEY != "",
-#             "vision_ai": vision_client is not None,
-#             "ollama": "disabled_for_deployment"
-#         },
-#         "errors": []
-#     }
-    
-#     # Test MongoDB connection
-#     if orchestrator and orchestrator.vector_store.mongo_collection:
-#         try:
-#             # Simple ping test
-#             await orchestrator.vector_store.mongo_collection.find_one({}, {"_id": 1})
-#             health_status["components"]["mongodb"] = True
-#         except Exception as e:
-#             health_status["components"]["mongodb"] = False
-#             health_status["errors"].append(f"MongoDB: {str(e)}")
-    
-#     # Test Qdrant connection
-#     if orchestrator and orchestrator.vector_store.qdrant_client:
-#         try:
-#             orchestrator.vector_store.qdrant_client.get_collections()
-#             health_status["components"]["qdrant"] = True
-#         except Exception as e:
-#             health_status["components"]["qdrant"] = False
-#             health_status["errors"].append(f"Qdrant: {str(e)}")
-    
-#     # Test Gemini
-#     if vision_client and vision_client.gemini_model:
-#         try:
-#             # Simple test generation
-#             test_response = vision_client.gemini_model.generate_content("Say 'OK'")
-#             if test_response.text:
-#                 health_status["components"]["vision_ai"] = True
-#         except Exception as e:
-#             health_status["components"]["vision_ai"] = False
-#             health_status["errors"].append(f"Gemini: {str(e)}")
-    
-#     # Determine overall status
-#     critical_components = ["orchestrator", "mongodb", "qdrant", "gemini_api_key"]
-#     if not all(health_status["components"][comp] for comp in critical_components):
-#         health_status["status"] = "degraded"
-    
-#     if health_status["errors"]:
-#         health_status["status"] = "unhealthy" if len(health_status["errors"]) > 2 else "degraded"
-    
-#     return health_status
-
-# # ========================================================================
-# # GIFT AI ENDPOINTS (Recommendation Engine)
-# # ========================================================================
-
-# @app.post("/generate_gift_bundle", response_model=ImageBundleResponse)
-# async def generate_gift_bundle(image: UploadFile = File(...)):
-#     """Image to Gift Bundle Pipeline"""
-#     if not orchestrator:
-#         raise HTTPException(status_code=503, detail="Service not initialized")
-    
-#     if not image.filename or not image.content_type.startswith("image/"):
-#         raise HTTPException(status_code=400, detail="Invalid image file")
-    
-#     try:
-#         image_bytes = await image.read()
-#         if len(image_bytes) > 5 * 1024 * 1024:
-#             raise HTTPException(status_code=400, detail="Image too large (max 5MB)")
-        
-#         logger.info(f"Processing: {image.filename}")
-#         result = await orchestrator.generate_bundle(image_bytes, image.filename)
-#         logger.info(f"Bundle generated: {result['bundle_id']}")
-#         return result
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"Failed: {e}")
-#         traceback.print_exc()
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/search_similar_gifts", response_model=TextSearchResponse)
-# async def search_similar_gifts(
-#     query: str = Query(..., min_length=1),
-#     limit: int = Query(10, ge=1, le=50)
-# ):
-#     """Text Search to Gift Bundle"""
-#     if not orchestrator:
-#         raise HTTPException(status_code=503, detail="Service not initialized")
-    
-#     if not query.strip():
-#         raise HTTPException(status_code=400, detail="Query cannot be empty")
-    
-#     try:
-#         logger.info(f"Searching: '{query}'")
-#         result = await orchestrator.process_gift_query(query, limit)
-#         logger.info(f"Found {len(result.get('bundles', []))} bundles")
-#         return result
-#     except Exception as e:
-#         logger.error(f"Search failed: {e}")
-#         traceback.print_exc()
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# # Alias endpoint for backward compatibility
-# @app.get("/search", response_model=TextSearchResponse)
-# async def search_alias(
-#     query: str = Query(..., min_length=1),
-#     limit: int = Query(10, ge=1, le=50)
-# ):
-#     """Alias for search_similar_gifts (GET method)"""
-#     return await search_similar_gifts(query, limit)
-
-# @app.post("/refresh_vector_store")
-# async def refresh_vector_store():
-#     """Refresh Vector Store (Admin)"""
-#     if not orchestrator:
-#         raise HTTPException(status_code=503, detail="Service not initialized")
-    
-#     try:
-#         logger.info("Starting refresh...")
-#         result = await orchestrator.refresh_vector_store()
-        
-#         if result.get("success"):
-#             logger.info("Refresh completed")
-#             return {
-#                 "success": True,
-#                 "message": result.get("message", "Refreshed successfully"),
-#                 "items_count": result.get("items_count", 0),
-#                 "collection": settings.COLLECTION_NAME
-#             }
-#         else:
-#             error_msg = result.get("error", "Unknown error")
-#             step = result.get("step", "unknown")
-#             logger.error(f"Refresh failed at step '{step}': {error_msg}")
-#             raise HTTPException(status_code=500, detail=f"Refresh failed at {step}: {error_msg}")
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"Refresh error: {e}")
-#         traceback.print_exc()
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/index_artwork")
-# async def index_artwork(request: ArtworkIndexRequest):
-#     """Index Single Artwork"""
-#     if not orchestrator:
-#         raise HTTPException(status_code=503, detail="Service not initialized")
-    
-#     try:
-#         item_dict = request.model_dump()
-#         text = f"{item_dict['title']} {item_dict['description']}"
-        
-#         embedding = orchestrator.vector_store.generate_embedding(text)
-#         if not embedding:
-#             raise HTTPException(status_code=500, detail="Embedding generation failed")
-        
-#         if len(embedding) > 768:
-#             embedding = embedding[:768]
-#         elif len(embedding) < 768:
-#             embedding.extend([0.0] * (768 - len(embedding)))
-        
-#         from qdrant_client.http.models import PointStruct
-        
-#         point = PointStruct(
-#             id=abs(hash(item_dict['mongo_id'])) % (10 ** 8),
-#             vector=embedding,
-#             payload={
-#                 'title': item_dict['title'],
-#                 'description': item_dict['description'],
-#                 'category': item_dict.get('category', 'General'),
-#                 'price': item_dict['price'],
-#                 'mongo_id': item_dict['mongo_id']
-#             }
-#         )
-        
-#         orchestrator.vector_store.qdrant_client.upsert(
-#             collection_name=settings.COLLECTION_NAME,
-#             points=[point]
-#         )
-        
-#         logger.info(f"Indexed: {item_dict['title']}")
-#         return {
-#             "success": True,
-#             "message": f"Indexed '{item_dict['title']}'",
-#             "item_id": item_dict['mongo_id']
-#         }
-#     except HTTPException:
-#         raise
-#     except Exception as e:
-#         logger.error(f"Indexing failed: {e}")
-#         traceback.print_exc()
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.get("/vector_store_info")
-# async def vector_store_info():
-#     """Get Vector Store Information"""
-#     if not orchestrator:
-#         raise HTTPException(status_code=503, detail="Service not initialized")
-    
-#     try:
-#         if orchestrator.vector_store.qdrant_client:
-#             collections = orchestrator.vector_store.qdrant_client.get_collections()
-#             collection_names = [col.name for col in collections.collections]
-            
-#             collection_info = None
-#             if settings.COLLECTION_NAME in collection_names:
-#                 collection_info = orchestrator.vector_store.qdrant_client.get_collection(
-#                     settings.COLLECTION_NAME
-#                 )
-            
-#             return {
-#                 "connected": True,
-#                 "qdrant_url": settings.QDRANT_URL,
-#                 "mongodb_db": settings.DATABASE_NAME,
-#                 "qdrant_collection": settings.COLLECTION_NAME,
-#                 "available_collections": collection_names,
-#                 "collection_info": {
-#                     "vectors_count": collection_info.vectors_count if collection_info else 0,
-#                     "points_count": collection_info.points_count if collection_info else 0
-#                 } if collection_info else None
-#             }
-#         else:
-#             return {"connected": False, "error": "Qdrant not initialized"}
-#     except Exception as e:
-#         logger.error(f"Info fetch failed: {e}")
-#         return {"connected": False, "error": str(e)}
-
-# # ========================================================================
-# # VISION AI ENDPOINTS (Image Analysis)
-# # ========================================================================
-
-# @app.post("/analyze_craft")
-# async def analyze_craft(image: UploadFile = File(...)) -> Dict:
-#     """Vision AI: Detect craft type"""
-#     logger.info(f"Analyzing craft in {image.filename}")
-    
-#     try:
-#         image_bytes = await image.read()
-        
-#         prompt = """Analyze this image and identify the type of craft or artwork shown.
-
-# Return a JSON object with:
-# {
-#     "craft_type": "pottery|textile|metalwork|painting|sculpture|woodwork|jewelry|other",
-#     "confidence": 0.0-1.0,
-#     "details": "brief description"
-# }"""
-        
-#         response = await vision_client.analyze_image(image_bytes, prompt)
-#         result = extract_json_from_response(response)
-#         result.setdefault('craft_type', 'unknown')
-#         result.setdefault('confidence', 0.5)
-        
-#         logger.info(f"Craft detected: {result.get('craft_type')}")
-#         return result
-#     except Exception as e:
-#         logger.error(f"Craft analysis failed: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/analyze_quality")
-# async def analyze_quality(image: UploadFile = File(...)) -> Dict:
-#     """Vision AI: Assess craftsmanship quality"""
-#     logger.info(f"Analyzing quality of {image.filename}")
-    
-#     try:
-#         image_bytes = await image.read()
-        
-#         prompt = """Analyze the quality and craftsmanship of this item.
-
-# Return JSON:
-# {
-#     "quality": "high|medium|low",
-#     "details": "describe finish, craftsmanship, flaws",
-#     "craftsmanship_score": 0.0-1.0
-# }"""
-        
-#         response = await vision_client.analyze_image(image_bytes, prompt)
-#         result = extract_json_from_response(response)
-#         result.setdefault('quality', 'medium')
-#         result.setdefault('details', 'No details available')
-        
-#         return result
-#     except Exception as e:
-#         logger.error(f"Quality analysis failed: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/estimate_price")
-# async def estimate_price(image: UploadFile = File(...)) -> Dict:
-#     """Vision AI: Estimate price range"""
-#     logger.info(f"Estimating price for {image.filename}")
-    
-#     try:
-#         image_bytes = await image.read()
-        
-#         prompt = """Estimate the price range for this handmade item in Indian Rupees.
-
-# Return JSON:
-# {
-#     "price_range_inr": "min-max",
-#     "estimated_price": numeric_value,
-#     "method": "description",
-#     "factors": ["factor1", "factor2"]
-# }"""
-        
-#         response = await vision_client.analyze_image(image_bytes, prompt)
-#         result = extract_json_from_response(response)
-#         result.setdefault('price_range_inr', '500-1500')
-#         result.setdefault('method', 'visual estimation')
-        
-#         return result
-#     except Exception as e:
-#         logger.error(f"Price estimation failed: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/detect_fraud")
-# async def detect_fraud(image: UploadFile = File(...)) -> Dict:
-#     """Vision AI: Detect fraud indicators"""
-#     logger.info(f"Fraud detection for {image.filename}")
-    
-#     try:
-#         image_bytes = await image.read()
-        
-#         prompt = """Analyze this image for potential fraud indicators.
-
-# Return JSON:
-# {
-#     "fraud_score": 0.0-1.0,
-#     "is_suspicious": true|false,
-#     "red_flags": ["flag1", "flag2"],
-#     "authenticity_indicators": ["indicator1"]
-# }"""
-        
-#         response = await vision_client.analyze_image(image_bytes, prompt)
-#         result = extract_json_from_response(response)
-#         result.setdefault('fraud_score', 0.0)
-#         result.setdefault('is_suspicious', False)
-        
-#         return result
-#     except Exception as e:
-#         logger.error(f"Fraud detection failed: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/suggest_packaging")
-# async def suggest_packaging(image: UploadFile = File(...)) -> Dict:
-#     """Vision AI: Recommend packaging"""
-#     logger.info(f"Packaging suggestions for {image.filename}")
-    
-#     try:
-#         image_bytes = await image.read()
-        
-#         prompt = """Recommend packaging for this item.
-
-# Return JSON:
-# {
-#     "packaging": "description",
-#     "cost": estimated_cost_in_rupees,
-#     "materials": ["material1", "material2"],
-#     "special_requirements": ["requirement1"]
-# }"""
-        
-#         response = await vision_client.analyze_image(image_bytes, prompt)
-#         result = extract_json_from_response(response)
-#         result.setdefault('packaging', 'standard eco-friendly box')
-#         result.setdefault('cost', 100)
-        
-#         return result
-#     except Exception as e:
-#         logger.error(f"Packaging suggestion failed: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/detect_material")
-# async def detect_material(image: UploadFile = File(...)) -> Dict:
-#     """Vision AI: Identify materials"""
-#     logger.info(f"Material detection for {image.filename}")
-    
-#     try:
-#         image_bytes = await image.read()
-        
-#         prompt = """Identify the materials used in this item.
-
-# Return JSON:
-# {
-#     "material": "primary material name",
-#     "purity": 0.0-1.0,
-#     "additional_materials": ["material1", "material2"],
-#     "texture": "description"
-# }"""
-        
-#         response = await vision_client.analyze_image(image_bytes, prompt)
-#         result = extract_json_from_response(response)
-#         result.setdefault('material', 'unknown')
-#         result.setdefault('purity', 0.8)
-        
-#         return result
-#     except Exception as e:
-#         logger.error(f"Material detection failed: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/analyze_sentiment")
-# async def analyze_sentiment(image: UploadFile = File(...)) -> Dict:
-#     """Vision AI: Analyze sentiment and aesthetic appeal"""
-#     logger.info(f"Sentiment analysis for {image.filename}")
-    
-#     try:
-#         image_bytes = await image.read()
-        
-#         prompt = """Analyze the emotional sentiment and aesthetic appeal of this item.
-
-# Return JSON:
-# {
-#     "sentiment": "warm|playful|elegant|traditional|modern|rustic",
-#     "emotion": "joyful|peaceful|energetic|nostalgic|sophisticated",
-#     "appeal_score": 0.0-1.0,
-#     "target_audience": "description"
-# }"""
-        
-#         response = await vision_client.analyze_image(image_bytes, prompt)
-#         result = extract_json_from_response(response)
-#         result.setdefault('sentiment', 'neutral')
-#         result.setdefault('emotion', 'pleasant')
-        
-#         return result
-#     except Exception as e:
-#         logger.error(f"Sentiment analysis failed: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/detect_occasion")
-# async def detect_occasion(image: UploadFile = File(...)) -> Dict:
-#     """Vision AI: Detect suitable occasions"""
-#     logger.info(f"Occasion detection for {image.filename}")
-    
-#     try:
-#         image_bytes = await image.read()
-        
-#         prompt = """Identify suitable occasions for gifting this item.
-
-# Return JSON:
-# {
-#     "occasion": "birthday|wedding|diwali|housewarming|anniversary|general",
-#     "confidence": 0.0-1.0,
-#     "suitable_occasions": ["occasion1", "occasion2"],
-#     "cultural_significance": "if any"
-# }"""
-        
-#         response = await vision_client.analyze_image(image_bytes, prompt)
-#         result = extract_json_from_response(response)
-#         result.setdefault('occasion', 'general')
-#         result.setdefault('confidence', 0.7)
-        
-#         return result
-#     except Exception as e:
-#         logger.error(f"Occasion detection failed: {e}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# # ========================================================================
-# # RUN SERVER
-# # ========================================================================
-# # ========================================================================
-# # RUN SERVER
-# # ========================================================================
-# if __name__ == "__main__":
-#     import uvicorn
-#     import os
-    
-#     port = int(os.getenv("PORT", 8001))
-    
-#     uvicorn.run(
-#         "main:app",
-#         host="0.0.0.0",
-#         port=port,
-#         reload=True,
-#         log_level="info"
-#     )
-
-
 # gift_ai_service/main.py
 """
-Unified Gift AI Service - ALL Vision AI endpoints fixed
-=======================================================
-FIXED: All vision AI endpoints now use direct client calls (no internal HTTP)
-NO HARDCODED VALUES: All analysis comes from Gemini Vision API
+UNIFIED GIFT AI SERVICE - Single File Deployment
+=================================================
+Combines ALL functionality:
+- Gift Bundle Generation (image → bundles)
+- Text Search (query → bundles)  
+- Vision AI Analysis (all 8 endpoints)
+- Vector Store Management
+
 Port: 8001
+Deployment: Single service, all endpoints accessible
 """
 
 # ========================================================================
@@ -746,8 +17,16 @@ Port: 8001
 # ========================================================================
 import os
 import io
-import base64
+import json
+import re
+import logging
+import traceback
+import uuid
+import asyncio
 from pathlib import Path
+from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime
+
 from dotenv import load_dotenv
 
 env_path = Path(__file__).parent / ".env"
@@ -757,12 +36,6 @@ if env_path.exists():
 # ========================================================================
 # IMPORTS
 # ========================================================================
-import logging
-import traceback
-import json
-import re
-from typing import Dict, Any, List, Optional
-
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -770,8 +43,9 @@ from contextlib import asynccontextmanager
 from PIL import Image
 import google.generativeai as genai
 
-from core.orchestrator import GiftOrchestrator
+# Import core components
 from core.config import settings
+from core.llm_client import LLMClient
 
 # ========================================================================
 # LOGGING
@@ -783,10 +57,10 @@ logging.basicConfig(
 logger = logging.getLogger("gift_ai.main")
 
 # ========================================================================
-# VISION AI CLIENT
+# VISION AI CLIENT (Direct - No HTTP)
 # ========================================================================
 class VisionAIClient:
-    """Gemini Vision AI client for all vision endpoints"""
+    """Unified Vision AI client using Gemini"""
     
     def __init__(self):
         self.gemini_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
@@ -796,148 +70,509 @@ class VisionAIClient:
             try:
                 genai.configure(api_key=self.gemini_api_key)
                 
-                # List available models first
-                try:
-                    available_models = genai.list_models()
-                    model_names_available = [m.name for m in available_models if 'generateContent' in m.supported_generation_methods]
-                    logger.info(f"📋 Available Gemini models: {[m.replace('models/', '') for m in model_names_available]}")
-                except Exception as e:
-                    logger.warning(f"Could not list models: {e}")
-                    model_names_available = []
-                
-                # Try models in priority order - based on your available models
+                # Try different models
                 model_names = [
-                    'gemini-2.5-pro',           # Your best vision model
-                    'gemini-2.5-flash',         # Fast alternative
-                    'gemini-pro-latest',        # Latest pro version
-                    'gemini-2.0-flash',         # Stable flash
-                    'gemini-flash-latest',      # Latest flash
-                    'gemini-3-pro-preview',     # Preview pro
+                    'gemini-2.5-flash',
+                    'gemini-2.0-flash', 
+                    'gemini-pro-latest',
+                    'gemini-flash-latest',
                 ]
                 
                 for name in model_names:
                     try:
                         self.gemini_model = genai.GenerativeModel(name)
-                        logger.info(f"✅ Vision AI initialized with model: {name}")
+                        logger.info(f"✅ Vision AI initialized with: {name}")
                         break
-                    except Exception as e:
-                        logger.debug(f"Model {name} not available: {e}")
+                    except:
                         continue
-                
-                # If priority models don't work, try first available model
-                if not self.gemini_model and model_names_available:
-                    for model_path in model_names_available:
-                        model_name = model_path.replace('models/', '')
-                        try:
-                            self.gemini_model = genai.GenerativeModel(model_name)
-                            logger.info(f"✅ Vision AI initialized with model: {model_name}")
-                            break
-                        except Exception as e:
-                            continue
                         
-                if not self.gemini_model:
-                    logger.error("❌ No suitable Gemini model available")
             except Exception as e:
                 logger.error(f"❌ Vision AI initialization failed: {e}")
-                self.gemini_model = None
         else:
-            logger.error("❌ No Gemini API key found in environment")
-        
-        # Ollama disabled
-        self.ollama_available = False
+            logger.warning("⚠️ No Gemini API key found")
     
     async def analyze_image(self, image_bytes: bytes, prompt: str) -> str:
         """Analyze image using Gemini Vision"""
         if not self.gemini_model:
-            raise Exception("Gemini Vision not configured - check GOOGLE_API_KEY or GEMINI_API_KEY in .env")
+            raise Exception("Gemini Vision not configured - check API key")
         
         try:
             image = Image.open(io.BytesIO(image_bytes))
             response = self.gemini_model.generate_content([prompt, image])
             
             if not response or not response.text:
-                raise Exception("Empty response from Gemini Vision")
+                raise Exception("Empty response from Gemini")
             
             return response.text
             
         except Exception as e:
-            logger.error(f"Gemini Vision API error: {e}")
+            logger.error(f"Gemini Vision error: {e}")
             raise Exception(f"Vision analysis failed: {str(e)}")
+
+# ========================================================================
+# VECTOR STORE (Embedded)
+# ========================================================================
+from motor.motor_asyncio import AsyncIOMotorClient
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import Distance, VectorParams, PointStruct
+import requests
+
+class VectorStore:
+    """Embedded Vector Store with real embeddings"""
+    
+    def __init__(self):
+        self.mongo_client = None
+        self.mongo_db = None
+        self.mongo_collection = None
+        self.qdrant_client = None
+        self.collection_name = settings.COLLECTION_NAME
+        self.google_api_key = settings.GOOGLE_API_KEY
+        self.genai = None
+        
+    async def connect(self):
+        """Connect to MongoDB and Qdrant"""
+        # MongoDB
+        try:
+            self.mongo_client = AsyncIOMotorClient(settings.MONGODB_URL)
+            self.mongo_db = self.mongo_client[settings.DATABASE_NAME]
+            self.mongo_collection = self.mongo_db[settings.COLLECTION_NAME]
+            logger.info(f"✅ MongoDB connected: {settings.DATABASE_NAME}.{settings.COLLECTION_NAME}")
+        except Exception as e:
+            logger.error(f"❌ MongoDB failed: {e}")
+            raise
+        
+        # Qdrant
+        try:
+            self.qdrant_client = QdrantClient(
+                url=settings.QDRANT_URL,
+                api_key=settings.QDRANT_API_KEY if settings.QDRANT_API_KEY else None
+            )
+            logger.info("✅ Qdrant connected")
+        except Exception as e:
+            logger.error(f"❌ Qdrant failed: {e}")
+            raise
+        
+        # Gemini for embeddings
+        if self.google_api_key:
+            try:
+                genai.configure(api_key=self.google_api_key)
+                self.genai = genai
+                logger.info("✅ Gemini embeddings ready")
+            except:
+                pass
+    
+    def generate_embedding(self, text: str) -> List[float]:
+        """Generate embedding using Gemini"""
+        if self.genai:
+            try:
+                result = self.genai.embed_content(
+                    model='models/embedding-001',
+                    content=text,
+                    task_type="retrieval_document"
+                )
+                return result['embedding']
+            except:
+                pass
+        
+        # Fallback: simple embedding
+        embedding = [0.0] * 768
+        for i, char in enumerate(text[:768]):
+            embedding[i] = (ord(char) % 100) / 100.0
+        return embedding
+    
+    async def get_mongo_items(self, limit: int = 100) -> List[Dict]:
+        """Fetch published items from MongoDB"""
+        if not self.mongo_collection:
+            raise Exception("MongoDB not connected")
+        
+        cursor = self.mongo_collection.find(
+            {"status": "published"}
+        ).limit(limit)
+        
+        items = []
+        async for doc in cursor:
+            doc["_id"] = str(doc["_id"])
+            items.append(doc)
+        
+        logger.info(f"📦 Retrieved {len(items)} items from MongoDB")
+        return items
+    
+    async def setup_collection(self) -> bool:
+        """Create Qdrant collection if needed"""
+        try:
+            collections = self.qdrant_client.get_collections()
+            exists = any(col.name == self.collection_name for col in collections.collections)
+            
+            if not exists:
+                self.qdrant_client.create_collection(
+                    collection_name=self.collection_name,
+                    vectors_config=VectorParams(size=768, distance=Distance.COSINE)
+                )
+                logger.info(f"✅ Created collection: {self.collection_name}")
+            
+            return True
+        except Exception as e:
+            logger.error(f"❌ Collection setup failed: {e}")
+            raise
+    
+    async def upload_items(self, items: List[Dict]) -> bool:
+        """Upload items to Qdrant"""
+        if not items:
+            return False
+        
+        points = []
+        for idx, item in enumerate(items):
+            text = f"{item.get('title', '')} {item.get('description', '')}"
+            embedding = self.generate_embedding(text)
+            
+            # Pad to 768
+            if len(embedding) < 768:
+                embedding.extend([0.0] * (768 - len(embedding)))
+            elif len(embedding) > 768:
+                embedding = embedding[:768]
+            
+            point = PointStruct(
+                id=idx + 1,
+                vector=embedding,
+                payload={
+                    'title': item.get('title', ''),
+                    'description': item.get('description', ''),
+                    'category': item.get('category', ''),
+                    'price': item.get('price', 0),
+                    'mongo_id': str(item.get('_id', ''))
+                }
+            )
+            points.append(point)
+        
+        self.qdrant_client.upsert(collection_name=self.collection_name, points=points)
+        logger.info(f"✅ Uploaded {len(points)} items")
+        return True
+    
+    async def search_related_items(self, text: str, limit: int = 10) -> List[Dict]:
+        """Search similar items"""
+        query_embedding = self.generate_embedding(text)
+        
+        if len(query_embedding) < 768:
+            query_embedding.extend([0.0] * (768 - len(query_embedding)))
+        elif len(query_embedding) > 768:
+            query_embedding = query_embedding[:768]
+        
+        results = self.qdrant_client.search(
+            collection_name=self.collection_name,
+            query_vector=query_embedding,
+            limit=limit
+        )
+        
+        items = []
+        for result in results:
+            items.append({
+                'title': result.payload.get('title', ''),
+                'description': result.payload.get('description', ''),
+                'category': result.payload.get('category', ''),
+                'price': result.payload.get('price', 0),
+                'score': result.score,
+                'mongo_id': result.payload.get('mongo_id', '')
+            })
+        
+        return items
+    
+    async def close(self):
+        """Close connections"""
+        if self.mongo_client:
+            self.mongo_client.close()
+
+# ========================================================================
+# GIFT AI SERVICES (Embedded)
+# ========================================================================
+
+async def extract_intent(image_bytes: bytes, vision_analysis: Dict) -> Dict:
+    """Extract gift intent from vision analysis"""
+    llm = LLMClient()
+    
+    vision_text = f"craft: {vision_analysis.get('craft_type')}, occasion: {vision_analysis.get('occasion_hint')}"
+    
+    prompt = f"""Extract gift intent from vision analysis: {vision_text}
+
+Return ONLY valid JSON:
+{{
+    "occasion": "birthday|wedding|diwali|general",
+    "recipient": "friend|family|anyone",
+    "budget_inr": 1000,
+    "sentiment": "warm|elegant|playful",
+    "interests": ["handmade", "decor"]
+}}"""
+    
+    try:
+        result = await llm.generate_text(prompt)
+        clean = result.strip()
+        if '```json' in clean:
+            clean = clean.split('```json')[1].split('```')[0]
+        
+        data = json.loads(clean.strip())
+        data.setdefault('occasion', 'birthday')
+        data.setdefault('budget_inr', 1000)
+        return data
+    except:
+        return {
+            "occasion": "birthday",
+            "recipient": "friend",
+            "budget_inr": 1000,
+            "sentiment": "warm",
+            "interests": ["handmade"]
+        }
+
+def validate_items(items: List[Dict], max_budget: float = None) -> Tuple[List[Dict], List[Dict]]:
+    """Validate items"""
+    valid = []
+    invalid = []
+    
+    for item in items:
+        if not item.get('title'):
+            invalid.append({'item': item, 'reason': 'No title'})
+            continue
+        
+        if max_budget and item.get('price', 0) > max_budget:
+            invalid.append({'item': item, 'reason': 'Over budget'})
+            continue
+        
+        valid.append(item)
+    
+    return valid, invalid
+
+class GiftBundleService:
+    """Generate gift bundles using LLM"""
+    
+    def __init__(self):
+        self.google_api_key = os.getenv('GOOGLE_API_KEY')
+        self.genai = None
+        
+        if self.google_api_key:
+            try:
+                genai.configure(api_key=self.google_api_key)
+                self.genai = genai
+            except:
+                pass
+    
+    async def generate_bundles(self, user_intent: str, items: List[Dict]) -> Dict:
+        """Generate bundles"""
+        items_str = "\n".join([
+            f"- {item.get('title')}: ₹{item.get('price')} ({item.get('category')})"
+            for item in items[:10]
+        ])
+        
+        prompt = f"""Create 3 gift bundles for: {user_intent}
+
+Available items:
+{items_str}
+
+Return ONLY valid JSON:
+{{
+    "bundles": [
+        {{
+            "bundle_name": "Creative name",
+            "description": "Why this works",
+            "items": [
+                {{
+                    "title": "exact title from list",
+                    "reason": "why included"
+                }}
+            ]
+        }}
+    ]
+}}"""
+        
+        try:
+            if self.genai:
+                model = self.genai.GenerativeModel('gemini-1.5-flash-001')
+                response = model.generate_content(prompt)
+                text = response.text
+                
+                if '```json' in text:
+                    text = text.split('```json')[1].split('```')[0]
+                
+                result = json.loads(text.strip())
+            else:
+                # Fallback
+                result = {
+                    "bundles": [{
+                        "bundle_name": "Curated Selection",
+                        "description": f"Items matching: {user_intent}",
+                        "items": [{"title": item['title'], "reason": "Relevant"} for item in items[:3]]
+                    }]
+                }
+        except:
+            result = {
+                "bundles": [{
+                    "bundle_name": "Curated Selection",
+                    "description": f"Items matching: {user_intent}",
+                    "items": [{"title": item['title'], "reason": "Relevant"} for item in items[:3]]
+                }]
+            }
+        
+        # Calculate prices
+        for bundle in result.get('bundles', []):
+            total = 0
+            for bundle_item in bundle.get('items', []):
+                for item in items:
+                    if item['title'] == bundle_item['title']:
+                        bundle_item['price'] = item.get('price', 0)
+                        total += item.get('price', 0)
+                        break
+            bundle['total_price'] = total
+        
+        return {'query': user_intent, 'bundles': result.get('bundles', [])}
+
+# ========================================================================
+# ORCHESTRATOR (Embedded)
+# ========================================================================
+class GiftOrchestrator:
+    """Main orchestrator"""
+    
+    def __init__(self):
+        self.vector_store = VectorStore()
+        self.bundle_service = GiftBundleService()
+    
+    async def refresh_vector_store(self) -> Dict:
+        """Refresh vector store"""
+        try:
+            items = await self.vector_store.get_mongo_items(limit=100)
+            if not items:
+                return {"success": False, "error": "No items in MongoDB"}
+            
+            await self.vector_store.setup_collection()
+            await self.vector_store.upload_items(items)
+            
+            return {"success": True, "items_count": len(items)}
+        except Exception as e:
+            logger.error(f"Refresh failed: {e}")
+            return {"success": False, "error": str(e)}
+    
+    async def generate_bundle(self, image_bytes: bytes, filename: str) -> Dict:
+        """Generate gift bundle from image"""
+        bundle_id = str(uuid.uuid4())
+        
+        try:
+            # Step 1: Vision analysis (direct client)
+            vision = await self._vision_analysis(image_bytes)
+            
+            # Step 2: Extract intent
+            intent = await extract_intent(image_bytes, vision)
+            
+            # Step 3: Retrieve items
+            query = f"{intent.get('occasion')} gift {' '.join(intent.get('interests', []))}"
+            items = await self.vector_store.search_related_items(query, limit=10)
+            
+            if not items:
+                return {
+                    "bundle_id": bundle_id,
+                    "vision": vision,
+                    "intent": intent,
+                    "bundles": [],
+                    "error": "No items found"
+                }
+            
+            # Step 4: Validate
+            valid_items, _ = validate_items(items)
+            
+            # Step 5: Generate bundles
+            result = await self.bundle_service.generate_bundles(str(intent), valid_items)
+            
+            return {
+                "bundle_id": bundle_id,
+                "vision": vision,
+                "intent": intent,
+                "bundles": result.get('bundles', []),
+                "metadata": {"total_retrieved": len(items), "valid_count": len(valid_items)}
+            }
+            
+        except Exception as e:
+            logger.error(f"Bundle generation failed: {e}")
+            traceback.print_exc()
+            return {
+                "bundle_id": bundle_id,
+                "bundles": [],
+                "error": str(e)
+            }
+    
+    async def _vision_analysis(self, image_bytes: bytes) -> Dict:
+        """Direct vision analysis - NO HTTP calls"""
+        if not vision_client or not vision_client.gemini_model:
+            return {"status": "unavailable", "error": "Vision AI not configured"}
+        
+        prompt = """Analyze this craft/artwork image.
+
+Return ONLY valid JSON:
+{
+    "craft_type": "pottery|textile|metalwork|painting|other",
+    "quality": "high|medium|low",
+    "price_range": "500-1500",
+    "estimated_price": 1000,
+    "occasion_hint": "birthday|wedding|general",
+    "sentiment": "warm|elegant|playful"
+}"""
+        
+        try:
+            response = await vision_client.analyze_image(image_bytes, prompt)
+            clean = response.strip()
+            if '```json' in clean:
+                clean = clean.split('```json')[1].split('```')[0]
+            
+            data = json.loads(clean.strip())
+            data['status'] = 'success'
+            return data
+        except Exception as e:
+            logger.error(f"Vision failed: {e}")
+            return {"status": "error", "error": str(e)}
+    
+    async def process_gift_query(self, query: str, limit: int = 10) -> Dict:
+        """Text search"""
+        try:
+            items = await self.vector_store.search_related_items(query, limit)
+            if not items:
+                return {'query': query, 'bundles': [], 'error': 'No items found'}
+            
+            valid_items, _ = validate_items(items)
+            result = await self.bundle_service.generate_bundles(query, valid_items)
+            
+            return result
+        except Exception as e:
+            logger.error(f"Query failed: {e}")
+            return {'query': query, 'bundles': [], 'error': str(e)}
 
 # ========================================================================
 # HELPER FUNCTIONS
 # ========================================================================
-def extract_json_from_response(text: str) -> Dict[str, Any]:
-    """Extract and parse JSON from LLM response"""
-    # Remove markdown code blocks
-    json_match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
-    if json_match:
-        text = json_match.group(1)
+def extract_json_from_response(text: str) -> Dict:
+    """Extract JSON from LLM response"""
+    if '```json' in text:
+        text = text.split('```json')[1].split('```')[0]
     elif '```' in text:
-        # Remove any markdown blocks
         text = re.sub(r'```.*?```', '', text, flags=re.DOTALL)
     
-    # Find JSON object
     json_match = re.search(r'\{.*\}', text, re.DOTALL)
     if json_match:
         text = json_match.group(0)
     
     try:
         return json.loads(text.strip())
-    except json.JSONDecodeError as e:
-        logger.warning(f"JSON parse failed: {e}")
-        logger.warning(f"Raw text: {text[:300]}")
-        raise Exception(f"Failed to parse JSON response: {str(e)}")
+    except:
+        return {"raw_response": text}
 
-async def call_vision_ai_comprehensive(image_bytes: bytes, analysis_type: str, prompt: str) -> Dict[str, Any]:
-    """
-    Universal vision AI caller - NO HTTP, direct client usage
-    NO HARDCODED VALUES: All data from Gemini Vision
-    """
-    logger.info(f"🎨 {analysis_type} - Using direct Gemini Vision client")
-    
-    if not vision_client:
-        raise HTTPException(status_code=503, detail="Vision client not initialized")
-    
-    if not vision_client.gemini_model:
-        raise HTTPException(
-            status_code=503, 
-            detail="Gemini Vision not configured - check API key in environment"
-        )
+async def call_vision_direct(image_bytes: bytes, prompt: str) -> Dict:
+    """Direct vision call - used by all vision endpoints"""
+    if not vision_client or not vision_client.gemini_model:
+        raise HTTPException(503, "Vision AI not configured")
     
     try:
-        # Call vision API directly
-        response_text = await vision_client.analyze_image(image_bytes, prompt)
-        
-        # Parse JSON response
-        result = extract_json_from_response(response_text)
-        
-        logger.info(f"✅ {analysis_type} completed successfully")
-        return result
-        
-    except json.JSONDecodeError as e:
-        logger.error(f"❌ {analysis_type} JSON parse error: {e}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"{analysis_type} returned invalid JSON: {str(e)}"
-        )
+        response = await vision_client.analyze_image(image_bytes, prompt)
+        return extract_json_from_response(response)
     except Exception as e:
-        logger.error(f"❌ {analysis_type} failed: {e}")
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500, 
-            detail=f"{analysis_type} error: {str(e)}"
-        )
+        logger.error(f"Vision call failed: {e}")
+        raise HTTPException(500, str(e))
 
 # ========================================================================
 # PYDANTIC MODELS
 # ========================================================================
-class GiftBundle(BaseModel):
-    bundle_name: str
-    description: str
-    items: List[Dict[str, Any]]
-    total_price: Optional[float] = None
-
 class ImageBundleResponse(BaseModel):
     bundle_id: str
     vision: Dict[str, Any]
@@ -959,69 +594,38 @@ orchestrator: Optional[GiftOrchestrator] = None
 vision_client: Optional[VisionAIClient] = None
 
 # ========================================================================
-# LIFECYCLE MANAGEMENT
+# LIFECYCLE
 # ========================================================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global orchestrator, vision_client
     
-    # Startup
     logger.info("🚀 Starting Unified Gift AI Service...")
-    logger.info(f"📦 MongoDB: {settings.DATABASE_NAME}.{settings.COLLECTION_NAME}")
-    logger.info(f"🔍 Qdrant: {settings.QDRANT_URL}")
-    logger.info(f"🤖 LLM: {settings.LLM_MODEL}")
     
     try:
-        # Initialize vision client first
-        logger.info("Initializing vision client...")
+        # Initialize vision client
         vision_client = VisionAIClient()
         
-        if vision_client.gemini_model:
-            logger.info("✅ Vision client ready")
-        else:
-            logger.warning("⚠️ Vision client initialized but Gemini not available")
-        
         # Initialize orchestrator
-        logger.info("Initializing orchestrator...")
         orchestrator = GiftOrchestrator()
-        
-        # Connect databases
-        logger.info("Connecting to databases...")
         await orchestrator.vector_store.connect()
-        logger.info("✅ Databases connected")
         
-        logger.info("🎉 Service fully initialized")
-        
+        logger.info("✅ Service initialized")
     except Exception as e:
         logger.error(f"❌ Startup failed: {e}")
         traceback.print_exc()
-        
-        # Partial initialization
-        if not vision_client:
-            vision_client = VisionAIClient()
-        if not orchestrator:
-            orchestrator = GiftOrchestrator()
     
     yield
     
-    # Shutdown
-    logger.info("Shutting down...")
     if orchestrator:
-        try:
-            await orchestrator.vector_store.close()
-            logger.info("✅ Connections closed")
-        except Exception as e:
-            logger.warning(f"Shutdown warning: {e}")
+        await orchestrator.vector_store.close()
 
 # ========================================================================
 # FASTAPI APP
 # ========================================================================
 app = FastAPI(
     title="Unified Gift AI Service",
-    description="Complete GenAI gift recommendation and vision analysis system",
-    version="3.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    version="4.0.0",
     lifespan=lifespan
 )
 
@@ -1033,59 +637,28 @@ app.add_middleware(
 )
 
 # ========================================================================
-# HEALTH & INFO ENDPOINTS
+# CORE ENDPOINTS
 # ========================================================================
+
 @app.get("/")
 async def root():
     return {
         "service": "unified-gift-ai",
-        "version": "3.1.0",
-        "status": "running",
-        "message": "Gift AI Service with direct Vision AI integration"
+        "version": "4.0.0",
+        "status": "running"
     }
 
 @app.get("/health")
-async def health_check():
-    """Comprehensive health check"""
-    health_status = {
+async def health():
+    """Health check"""
+    return {
         "status": "healthy",
-        "service": "unified-gift-ai",
-        "version": "3.1.0",
         "components": {
             "orchestrator": orchestrator is not None,
-            "mongodb": False,
-            "qdrant": False,
-            "gemini_configured": bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")),
             "vision_ai": vision_client is not None and vision_client.gemini_model is not None,
-        },
-        "errors": []
+            "gemini_configured": bool(os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY"))
+        }
     }
-    
-    # Test MongoDB
-    if orchestrator and orchestrator.vector_store.mongo_collection:
-        try:
-            await orchestrator.vector_store.mongo_collection.find_one({}, {"_id": 1})
-            health_status["components"]["mongodb"] = True
-        except Exception as e:
-            health_status["errors"].append(f"MongoDB: {str(e)}")
-    
-    # Test Qdrant
-    if orchestrator and orchestrator.vector_store.qdrant_client:
-        try:
-            orchestrator.vector_store.qdrant_client.get_collections()
-            health_status["components"]["qdrant"] = True
-        except Exception as e:
-            health_status["errors"].append(f"Qdrant: {str(e)}")
-    
-    # Determine overall status
-    critical = ["orchestrator", "mongodb", "qdrant", "gemini_configured"]
-    if not all(health_status["components"][c] for c in critical):
-        health_status["status"] = "degraded"
-    
-    if health_status["errors"]:
-        health_status["status"] = "unhealthy" if len(health_status["errors"]) > 2 else "degraded"
-    
-    return health_status
 
 # ========================================================================
 # GIFT AI ENDPOINTS
@@ -1093,52 +666,41 @@ async def health_check():
 
 @app.post("/generate_gift_bundle", response_model=ImageBundleResponse)
 async def generate_gift_bundle(image: UploadFile = File(...)):
-    """Image to Gift Bundle Pipeline"""
+    """Image → Gift Bundles"""
     if not orchestrator:
-        raise HTTPException(status_code=503, detail="Service not initialized")
-    
-    if not image.filename or not image.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Invalid image file")
+        raise HTTPException(503, "Service not initialized")
     
     try:
         image_bytes = await image.read()
         if len(image_bytes) > 5 * 1024 * 1024:
-            raise HTTPException(status_code=400, detail="Image too large (max 5MB)")
+            raise HTTPException(400, "Image too large (max 5MB)")
         
-        logger.info(f"Processing image: {image.filename}")
         result = await orchestrator.generate_bundle(image_bytes, image.filename)
-        logger.info(f"Bundle generated: {result['bundle_id']}")
         return result
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Bundle generation failed: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 @app.post("/search_similar_gifts", response_model=TextSearchResponse)
 async def search_similar_gifts(
     query: str = Query(..., min_length=1),
     limit: int = Query(10, ge=1, le=50)
 ):
-    """Text Search to Gift Bundle"""
+    """Text Search → Bundles"""
     if not orchestrator:
-        raise HTTPException(status_code=503, detail="Service not initialized")
+        raise HTTPException(503, "Service not initialized")
     
     try:
-        logger.info(f"Text search: '{query}'")
         result = await orchestrator.process_gift_query(query, limit)
         return result
     except Exception as e:
         logger.error(f"Search failed: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(500, str(e))
 
 @app.get("/search", response_model=TextSearchResponse)
-async def search_alias(
-    query: str = Query(..., min_length=1),
-    limit: int = Query(10, ge=1, le=50)
-):
+async def search_alias(query: str = Query(...), limit: int = Query(10)):
     """Alias for search_similar_gifts"""
     return await search_similar_gifts(query, limit)
 
@@ -1146,272 +708,113 @@ async def search_alias(
 async def refresh_vector_store():
     """Refresh Vector Store"""
     if not orchestrator:
-        raise HTTPException(status_code=503, detail="Service not initialized")
+        raise HTTPException(503, "Service not initialized")
     
-    try:
-        result = await orchestrator.refresh_vector_store()
-        if result.get("success"):
-            return {
-                "success": True,
-                "message": result.get("message"),
-                "items_count": result.get("items_count", 0)
-            }
-        else:
-            raise HTTPException(
-                status_code=500, 
-                detail=f"Refresh failed at {result.get('step')}: {result.get('error')}"
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Refresh error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    result = await orchestrator.refresh_vector_store()
+    if result.get("success"):
+        return {"success": True, "items_count": result.get("items_count", 0)}
+    else:
+        raise HTTPException(500, result.get("error", "Unknown error"))
 
 # ========================================================================
-# VISION AI ENDPOINTS - ALL FIXED WITH DIRECT CLIENT
+# VISION AI ENDPOINTS (All Direct - No HTTP)
 # ========================================================================
 
 @app.post("/analyze_craft")
-async def analyze_craft(image: UploadFile = File(...)) -> Dict:
-    """
-    FIXED: Analyze craft type using direct vision client
-    NO HARDCODED VALUES
-    """
+async def analyze_craft(image: UploadFile = File(...)):
+    """Detect craft type"""
     image_bytes = await image.read()
     
-    prompt = """Analyze this image to identify the type of craft or artwork.
-
-Return ONLY valid JSON (no markdown, no extra text):
-{
-    "craft_type": "specific category: pottery|textile|metalwork|painting|sculpture|woodwork|jewelry|decorative|other",
-    "confidence": 0.0-1.0,
-    "subcategory": "more specific type if applicable",
-    "details": "brief visual description",
-    "cultural_origin": "if identifiable from visual style"
-}
-
-Base your analysis on:
-- Visual characteristics and techniques visible
-- Materials and construction methods evident
-- Traditional craft patterns or styles
-- Functional vs decorative nature"""
+    prompt = """Analyze craft type. Return ONLY JSON:
+{"craft_type": "pottery|textile|metalwork|painting|other", "confidence": 0.0-1.0, "details": "brief description"}"""
     
-    return await call_vision_ai_comprehensive(image_bytes, "Craft Type Analysis", prompt)
+    result = await call_vision_direct(image_bytes, prompt)
+    result.setdefault('craft_type', 'unknown')
+    return result
 
 @app.post("/analyze_quality")
-async def analyze_quality(image: UploadFile = File(...)) -> Dict:
-    """
-    FIXED: Assess quality using direct vision client
-    NO HARDCODED VALUES
-    """
+async def analyze_quality(image: UploadFile = File(...)):
+    """Assess quality"""
     image_bytes = await image.read()
     
-    prompt = """Analyze the quality and craftsmanship of this handmade item.
-
-Return ONLY valid JSON (no markdown):
-{
-    "quality": "high|medium|low",
-    "craftsmanship_score": 0.0-1.0,
-    "finish_quality": "description of surface finish and polish",
-    "attention_to_detail": "assessment of fine details and precision",
-    "professional_level": "hobbyist|intermediate|professional|master",
-    "quality_indicators": ["specific observable quality features"],
-    "flaws_noted": ["any visible imperfections if present"]
-}
-
-Assess based on:
-- Surface finish and smoothness
-- Symmetry and proportions
-- Detail work and precision
-- Material treatment
-- Overall professional appearance"""
+    prompt = """Analyze quality. Return ONLY JSON:
+{"quality": "high|medium|low", "craftsmanship_score": 0.0-1.0, "details": "description"}"""
     
-    return await call_vision_ai_comprehensive(image_bytes, "Quality Assessment", prompt)
+    result = await call_vision_direct(image_bytes, prompt)
+    result.setdefault('quality', 'medium')
+    return result
 
 @app.post("/estimate_price")
-async def estimate_price(image: UploadFile = File(...)) -> Dict:
-    """
-    FIXED: Estimate price using direct vision client
-    NO HARDCODED VALUES
-    """
+async def estimate_price(image: UploadFile = File(...)):
+    """Estimate price"""
     image_bytes = await image.read()
     
-    prompt = """Estimate the price range for this handmade item in Indian Rupees based on visual analysis.
-
-Return ONLY valid JSON:
-{
-    "price_range_inr": "min-max format like 500-1500",
-    "estimated_price": numeric_value_in_rupees,
-    "confidence": 0.0-1.0,
-    "pricing_factors": ["factors affecting price"],
-    "market_segment": "budget|mid-range|premium|luxury",
-    "size_estimate": "small|medium|large based on visual cues",
-    "complexity": "simple|moderate|complex|highly_intricate"
-}
-
-Consider in your estimate:
-- Apparent size and scale
-- Material quality visible
-- Craftsmanship level
-- Detail and complexity
-- Finish quality
-- Indian handmade craft market standards
-- Time investment apparent in creation"""
+    prompt = """Estimate price in INR. Return ONLY JSON:
+{"price_range_inr": "500-1500", "estimated_price": 1000, "factors": ["list"]}"""
     
-    return await call_vision_ai_comprehensive(image_bytes, "Price Estimation", prompt)
+    result = await call_vision_direct(image_bytes, prompt)
+    result.setdefault('estimated_price', 1000)
+    return result
 
 @app.post("/detect_fraud")
-async def detect_fraud(image: UploadFile = File(...)) -> Dict:
-    """
-    FIXED: Detect fraud indicators using direct vision client
-    NO HARDCODED VALUES
-    """
+async def detect_fraud(image: UploadFile = File(...)):
+    """Detect fraud"""
     image_bytes = await image.read()
     
-    prompt = """Analyze this image for authenticity and fraud indicators.
-
-Return ONLY valid JSON:
-{
-    "fraud_score": 0.0-1.0 (0=authentic, 1=highly suspicious),
-    "is_suspicious": true|false,
-    "authenticity_confidence": 0.0-1.0,
-    "red_flags": ["specific suspicious elements if any"],
-    "authenticity_indicators": ["signs of genuine handmade work"],
-    "assessment": "brief overall authenticity assessment"
-}
-
-Check for:
-- Stock photo characteristics (perfect studio lighting, watermarks, professional staging)
-- AI-generated image artifacts (unnatural textures, impossible geometry, blending errors)
-- Mass production indicators (perfect repetition, mold marks, industrial finish)
-- Handmade authenticity signs (slight irregularities, tool marks, natural variations)
-- Image manipulation signs (color banding, clone stamp patterns, resolution inconsistencies)"""
+    prompt = """Detect fraud indicators. Return ONLY JSON:
+{"fraud_score": 0.0-1.0, "is_suspicious": false, "red_flags": []}"""
     
-    return await call_vision_ai_comprehensive(image_bytes, "Fraud Detection", prompt)
+    result = await call_vision_direct(image_bytes, prompt)
+    result.setdefault('fraud_score', 0.0)
+    return result
 
 @app.post("/suggest_packaging")
-async def suggest_packaging(image: UploadFile = File(...)) -> Dict:
-    """
-    FIXED: Suggest packaging using direct vision client
-    NO HARDCODED VALUES
-    """
+async def suggest_packaging(image: UploadFile = File(...)):
+    """Suggest packaging"""
     image_bytes = await image.read()
     
-    prompt = """Recommend appropriate packaging for this handmade item based on visual assessment.
-
-Return ONLY valid JSON:
-{
-    "packaging_type": "specific packaging recommendation",
-    "estimated_cost": numeric_value_in_rupees,
-    "materials": ["packaging materials needed"],
-    "protection_level": "minimal|moderate|high|fragile",
-    "presentation_style": "simple|elegant|premium|traditional",
-    "special_requirements": ["any special packaging needs"],
-    "eco_friendly_option": "eco-friendly alternative if applicable"
-}
-
-Base recommendations on:
-- Item fragility assessment
-- Apparent size and weight
-- Surface delicacy
-- Presentation value expected
-- Protection needs during transport
-- Gift-worthiness and presentation appeal"""
+    prompt = """Recommend packaging. Return ONLY JSON:
+{"packaging": "description", "cost": 100, "materials": []}"""
     
-    return await call_vision_ai_comprehensive(image_bytes, "Packaging Suggestion", prompt)
+    result = await call_vision_direct(image_bytes, prompt)
+    result.setdefault('packaging', 'eco-friendly box')
+    return result
 
 @app.post("/detect_material")
-async def detect_material(image: UploadFile = File(...)) -> Dict:
-    """
-    FIXED: Identify materials using direct vision client
-    NO HARDCODED VALUES
-    """
+async def detect_material(image: UploadFile = File(...)):
+    """Identify materials"""
     image_bytes = await image.read()
     
-    prompt = """Identify the materials used in this handmade item from visual analysis.
-
-Return ONLY valid JSON:
-{
-    "primary_material": "main material identified",
-    "material_purity": 0.0-1.0 (quality/purity estimate),
-    "secondary_materials": ["other materials visible"],
-    "material_quality": "low|medium|high|premium",
-    "texture_description": "surface texture characteristics",
-    "finish_type": "matte|glossy|satin|textured|natural",
-    "identification_confidence": 0.0-1.0
-}
-
-Identify materials from:
-- Visual texture patterns
-- Color and reflectivity
-- Surface characteristics
-- Construction techniques visible
-- Material interaction at joints/edges
-- Finish and treatment appearance"""
+    prompt = """Identify materials. Return ONLY JSON:
+{"material": "primary material", "purity": 0.8, "additional_materials": []}"""
     
-    return await call_vision_ai_comprehensive(image_bytes, "Material Identification", prompt)
+    result = await call_vision_direct(image_bytes, prompt)
+    result.setdefault('material', 'mixed')
+    return result
 
 @app.post("/analyze_sentiment")
-async def analyze_sentiment(image: UploadFile = File(...)) -> Dict:
-    """
-    FIXED: Analyze sentiment using direct vision client
-    NO HARDCODED VALUES
-    """
+async def analyze_sentiment(image: UploadFile = File(...)):
+    """Analyze sentiment"""
     image_bytes = await image.read()
     
-    prompt = """Analyze the emotional sentiment and aesthetic appeal of this handmade item.
-
-Return ONLY valid JSON:
-{
-    "sentiment": "primary aesthetic feeling: warm|playful|elegant|traditional|modern|rustic|minimalist|bold",
-    "emotion": "emotional quality: joyful|peaceful|energetic|nostalgic|sophisticated|calming|romantic",
-    "appeal_score": 0.0-1.0,
-    "aesthetic_style": "overall design aesthetic",
-    "color_mood": "emotional impact of color palette",
-    "target_demographic": "who would appreciate this aesthetically",
-    "emotional_keywords": ["emotional/aesthetic descriptors"]
-}
-
-Assess based on:
-- Design language and style
-- Color palette emotional impact
-- Form and proportion feeling
-- Cultural aesthetic elements
-- Contemporary vs traditional appeal
-- Visual harmony and balance"""
+    prompt = """Analyze sentiment. Return ONLY JSON:
+{"sentiment": "warm|elegant|playful", "emotion": "joyful|peaceful", "appeal_score": 0.0-1.0}"""
     
-    return await call_vision_ai_comprehensive(image_bytes, "Sentiment Analysis", prompt)
+    result = await call_vision_direct(image_bytes, prompt)
+    result.setdefault('sentiment', 'warm')
+    return result
 
 @app.post("/detect_occasion")
-async def detect_occasion(image: UploadFile = File(...)) -> Dict:
-    """
-    FIXED: Detect suitable occasions using direct vision client
-    NO HARDCODED VALUES
-    """
+async def detect_occasion(image: UploadFile = File(...)):
+    """Detect occasion"""
     image_bytes = await image.read()
     
-    prompt = """Identify suitable gifting occasions for this handmade item based on design elements.
-
-Return ONLY valid JSON:
-{
-    "primary_occasion": "best fit: birthday|wedding|diwali|holi|anniversary|housewarming|graduation|raksha_bandhan|eid|christmas|general",
-    "confidence": 0.0-1.0,
-    "suitable_occasions": ["all applicable occasions"],
-    "occasion_reasoning": "why these occasions fit",
-    "cultural_significance": "if design has cultural/festival relevance",
-    "age_suitability": "appropriate age groups",
-    "formality_level": "casual|semi-formal|formal|ceremonial"
-}
-
-Determine based on:
-- Design motifs and symbolism
-- Cultural/traditional elements
-- Color significance in Indian context
-- Formality and presentation level
-- Functional vs decorative nature
-- Festival/celebration associations"""
+    prompt = """Detect suitable occasions. Return ONLY JSON:
+{"occasion": "birthday|wedding|general", "confidence": 0.7, "suitable_occasions": []}"""
     
-    return await call_vision_ai_comprehensive(image_bytes, "Occasion Detection", prompt)
+    result = await call_vision_direct(image_bytes, prompt)
+    result.setdefault('occasion', 'general')
+    return result
 
 # ========================================================================
 # RUN SERVER

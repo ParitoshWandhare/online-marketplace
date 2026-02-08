@@ -718,103 +718,167 @@ async def refresh_vector_store():
 
 # ========================================================================
 # VISION AI ENDPOINTS (All Direct - No HTTP)
+# Supports BOTH naming: /analyze_craft AND /analyze-craft
 # ========================================================================
 
-@app.post("/analyze_craft")
-async def analyze_craft(image: UploadFile = File(...)):
-    """Detect craft type"""
+async def _analyze_craft_impl(image: UploadFile):
+    """Detect craft type - implementation"""
     image_bytes = await image.read()
-    
     prompt = """Analyze craft type. Return ONLY JSON:
 {"craft_type": "pottery|textile|metalwork|painting|other", "confidence": 0.0-1.0, "details": "brief description"}"""
-    
     result = await call_vision_direct(image_bytes, prompt)
     result.setdefault('craft_type', 'unknown')
     return result
 
-@app.post("/analyze_quality")
-async def analyze_quality(image: UploadFile = File(...)):
-    """Assess quality"""
+@app.post("/analyze_craft")
+async def analyze_craft_underscore(image: UploadFile = File(...)):
+    """Detect craft type (underscore version)"""
+    return await _analyze_craft_impl(image)
+
+@app.post("/analyze-craft")
+async def analyze_craft_hyphen(image: UploadFile = File(...)):
+    """Detect craft type (hyphen version - backend compatibility)"""
+    return await _analyze_craft_impl(image)
+
+
+async def _analyze_quality_impl(image: UploadFile):
+    """Assess quality - implementation"""
     image_bytes = await image.read()
-    
     prompt = """Analyze quality. Return ONLY JSON:
 {"quality": "high|medium|low", "craftsmanship_score": 0.0-1.0, "details": "description"}"""
-    
     result = await call_vision_direct(image_bytes, prompt)
     result.setdefault('quality', 'medium')
     return result
 
-@app.post("/estimate_price")
-async def estimate_price(image: UploadFile = File(...)):
-    """Estimate price"""
+@app.post("/analyze_quality")
+async def analyze_quality_underscore(image: UploadFile = File(...)):
+    """Assess quality (underscore version)"""
+    return await _analyze_quality_impl(image)
+
+@app.post("/analyze-quality")
+async def analyze_quality_hyphen(image: UploadFile = File(...)):
+    """Assess quality (hyphen version - backend compatibility)"""
+    return await _analyze_quality_impl(image)
+
+
+async def _estimate_price_impl(image: UploadFile):
+    """Estimate price - implementation"""
     image_bytes = await image.read()
-    
     prompt = """Estimate price in INR. Return ONLY JSON:
 {"price_range_inr": "500-1500", "estimated_price": 1000, "factors": ["list"]}"""
-    
     result = await call_vision_direct(image_bytes, prompt)
     result.setdefault('estimated_price', 1000)
     return result
 
-@app.post("/detect_fraud")
-async def detect_fraud(image: UploadFile = File(...)):
-    """Detect fraud"""
+@app.post("/estimate_price")
+async def estimate_price_underscore(image: UploadFile = File(...)):
+    """Estimate price (underscore version)"""
+    return await _estimate_price_impl(image)
+
+@app.post("/estimate-price")
+async def estimate_price_hyphen(image: UploadFile = File(...)):
+    """Estimate price (hyphen version - backend compatibility)"""
+    return await _estimate_price_impl(image)
+
+
+async def _detect_fraud_impl(image: UploadFile):
+    """Detect fraud - implementation"""
     image_bytes = await image.read()
-    
     prompt = """Detect fraud indicators. Return ONLY JSON:
 {"fraud_score": 0.0-1.0, "is_suspicious": false, "red_flags": []}"""
-    
     result = await call_vision_direct(image_bytes, prompt)
     result.setdefault('fraud_score', 0.0)
     return result
 
-@app.post("/suggest_packaging")
-async def suggest_packaging(image: UploadFile = File(...)):
-    """Suggest packaging"""
+@app.post("/detect_fraud")
+async def detect_fraud_underscore(image: UploadFile = File(...)):
+    """Detect fraud (underscore version)"""
+    return await _detect_fraud_impl(image)
+
+@app.post("/detect-fraud")
+async def detect_fraud_hyphen(image: UploadFile = File(...)):
+    """Detect fraud (hyphen version - backend compatibility)"""
+    return await _detect_fraud_impl(image)
+
+
+async def _suggest_packaging_impl(image: UploadFile):
+    """Suggest packaging - implementation"""
     image_bytes = await image.read()
-    
     prompt = """Recommend packaging. Return ONLY JSON:
 {"packaging": "description", "cost": 100, "materials": []}"""
-    
     result = await call_vision_direct(image_bytes, prompt)
     result.setdefault('packaging', 'eco-friendly box')
     return result
 
-@app.post("/detect_material")
-async def detect_material(image: UploadFile = File(...)):
-    """Identify materials"""
+@app.post("/suggest_packaging")
+async def suggest_packaging_underscore(image: UploadFile = File(...)):
+    """Suggest packaging (underscore version)"""
+    return await _suggest_packaging_impl(image)
+
+@app.post("/suggest-packaging")
+async def suggest_packaging_hyphen(image: UploadFile = File(...)):
+    """Suggest packaging (hyphen version - backend compatibility)"""
+    return await _suggest_packaging_impl(image)
+
+
+async def _detect_material_impl(image: UploadFile):
+    """Identify materials - implementation"""
     image_bytes = await image.read()
-    
     prompt = """Identify materials. Return ONLY JSON:
 {"material": "primary material", "purity": 0.8, "additional_materials": []}"""
-    
     result = await call_vision_direct(image_bytes, prompt)
     result.setdefault('material', 'mixed')
     return result
 
-@app.post("/analyze_sentiment")
-async def analyze_sentiment(image: UploadFile = File(...)):
-    """Analyze sentiment"""
+@app.post("/detect_material")
+async def detect_material_underscore(image: UploadFile = File(...)):
+    """Identify materials (underscore version)"""
+    return await _detect_material_impl(image)
+
+@app.post("/detect-material")
+async def detect_material_hyphen(image: UploadFile = File(...)):
+    """Identify materials (hyphen version - backend compatibility)"""
+    return await _detect_material_impl(image)
+
+
+async def _analyze_sentiment_impl(image: UploadFile):
+    """Analyze sentiment - implementation"""
     image_bytes = await image.read()
-    
     prompt = """Analyze sentiment. Return ONLY JSON:
 {"sentiment": "warm|elegant|playful", "emotion": "joyful|peaceful", "appeal_score": 0.0-1.0}"""
-    
     result = await call_vision_direct(image_bytes, prompt)
     result.setdefault('sentiment', 'warm')
     return result
 
-@app.post("/detect_occasion")
-async def detect_occasion(image: UploadFile = File(...)):
-    """Detect occasion"""
+@app.post("/analyze_sentiment")
+async def analyze_sentiment_underscore(image: UploadFile = File(...)):
+    """Analyze sentiment (underscore version)"""
+    return await _analyze_sentiment_impl(image)
+
+@app.post("/analyze-sentiment")
+async def analyze_sentiment_hyphen(image: UploadFile = File(...)):
+    """Analyze sentiment (hyphen version - backend compatibility)"""
+    return await _analyze_sentiment_impl(image)
+
+
+async def _detect_occasion_impl(image: UploadFile):
+    """Detect occasion - implementation"""
     image_bytes = await image.read()
-    
     prompt = """Detect suitable occasions. Return ONLY JSON:
 {"occasion": "birthday|wedding|general", "confidence": 0.7, "suitable_occasions": []}"""
-    
     result = await call_vision_direct(image_bytes, prompt)
     result.setdefault('occasion', 'general')
     return result
+
+@app.post("/detect_occasion")
+async def detect_occasion_underscore(image: UploadFile = File(...)):
+    """Detect occasion (underscore version)"""
+    return await _detect_occasion_impl(image)
+
+@app.post("/detect-occasion")
+async def detect_occasion_hyphen(image: UploadFile = File(...)):
+    """Detect occasion (hyphen version - backend compatibility)"""
+    return await _detect_occasion_impl(image)
 
 # ========================================================================
 # RUN SERVER

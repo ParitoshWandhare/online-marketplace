@@ -109,11 +109,12 @@
 const axios = require("axios");
 const FormData = require("form-data");
 
-// FIXED: Consolidated AI service URL
-const AI_BASE = process.env.GIFT_AI_SERVICE_URL || "https://orchid-giftai-f6fxg6gwdbg0a2hd.centralindia-01.azurewebsites.net";
+// Vision AI service configuration
+const AI_BASE = process.env.AI_SERVICES_URL || "https://orchid-genai.azurewebsites.net";
 const AI_API_KEY = process.env.AI_SERVICE_KEY || "";
 
 console.log(`🔧 Vision AI Service URL: ${AI_BASE}`);
+console.log(`🔐 API Key configured: ${AI_API_KEY ? 'Yes' : 'No'}`);
 
 /**
  * Fetch raw bytes from an accessible URL (Cloudinary secure_url)
@@ -147,7 +148,7 @@ async function postImageToAI(endpoint, file, options = {}) {
   let filename = file?.originalname || `upload-${Date.now()}.jpg`;
   let contentType = file?.mimetype || "image/jpeg";
 
-  console.log(`🔧 Calling Vision AI: ${AI_BASE}${endpoint}`);
+  console.log(`📤 Calling Vision AI: ${AI_BASE}${endpoint}`);
 
   // Handle different file sources
   if (file?.buffer) {
@@ -184,30 +185,31 @@ async function postImageToAI(endpoint, file, options = {}) {
   try {
     const resp = await axios.post(url, form, {
       headers,
-      timeout: 60000, // 60s timeout for AI processing
+      timeout: 300000, // 300s (5 min) timeout for AI processing - matches backend timeout
       maxContentLength: Infinity,
       maxBodyLength: Infinity,
     });
     
-    console.log(`✅ Vision AI response from ${endpoint}:`, resp.status);
+    console.log(`✅ Vision AI response from ${endpoint}: ${resp.status}`);
     return resp.data;
     
   } catch (err) {
     const errorMsg = err?.response?.data?.detail || err?.response?.data?.message || err.message;
-    console.error(`❌ Vision AI Error for ${endpoint}:`, errorMsg);
+    const statusCode = err?.response?.status || 'N/A';
+    console.error(`❌ Vision AI Error for ${endpoint} (${statusCode}):`, errorMsg);
     
-    throw new Error(`AI service request failed: ${errorMsg}`);
+    throw new Error(`Vision AI request failed: ${errorMsg}`);
   }
 }
 
-// Exports with CORRECT endpoint paths
+// FIXED: Use hyphenated endpoints (matching what the backend expects and what vision_routes_fixed.py provides)
 module.exports = {
-  generateStory: (file, opts) => postImageToAI("/vision/generate_story", file, opts),
-  similarCrafts: (file, opts) => postImageToAI("/vision/similar_crafts", file, opts),
-  priceSuggestion: (file, opts) => postImageToAI("/vision/price_suggestion", file, opts),
-  complementaryProducts: (file, opts) => postImageToAI("/vision/complementary_products", file, opts),
-  purchaseAnalysis: (file, opts) => postImageToAI("/vision/purchase_analysis", file, opts),
-  fraudDetection: (file, opts) => postImageToAI("/vision/fraud_detection", file, opts),
-  orderFulfillment: (file, opts) => postImageToAI("/vision/order_fulfillment_analysis", file, opts),
-  qualityPredictions: (file, opts) => postImageToAI("/vision/quality_predictions", file, opts),
+  generateStory: (file, opts) => postImageToAI("/vision/generate-story", file, opts),
+  similarCrafts: (file, opts) => postImageToAI("/vision/similar-crafts", file, opts),
+  priceSuggestion: (file, opts) => postImageToAI("/vision/price-suggestion", file, opts),
+  complementaryProducts: (file, opts) => postImageToAI("/vision/complementary-products", file, opts),
+  purchaseAnalysis: (file, opts) => postImageToAI("/vision/purchase-analysis", file, opts),
+  fraudDetection: (file, opts) => postImageToAI("/vision/fraud-detection", file, opts),
+  orderFulfillment: (file, opts) => postImageToAI("/vision/order-fulfillment-analysis", file, opts),
+  qualityPredictions: (file, opts) => postImageToAI("/vision/quality-predictions", file, opts),
 };

@@ -1,4 +1,12 @@
 // backend/src/routes/giftAIRoutes.js
+/**
+ * Gift AI Routes - Updated with Async Processing Support
+ * FIXES:
+ * - Added async endpoints for operations that may exceed Azure's 230s timeout
+ * - Status checking endpoints for long-running operations
+ * - Better error handling
+ */
+
 const express = require("express");
 const multer = require("multer");
 const giftAIController = require("../controllers/giftAIController");
@@ -6,14 +14,13 @@ const isAuthenticated = require("../middlewares/authMiddleware");
 
 const router = express.Router();
 
-// Configure multer for memory storage (we'll pass buffer to AI service)
+// Configure multer for memory storage
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit
   },
   fileFilter: (req, file, cb) => {
-    // Accept images only
     if (file.mimetype.startsWith("image/")) {
       cb(null, true);
     } else {
@@ -23,7 +30,23 @@ const upload = multer({
 });
 
 // ========================================================================
-// PUBLIC ENDPOINTS (No authentication required for demo/testing)
+// IN-MEMORY STORAGE FOR ASYNC OPERATIONS
+// ========================================================================
+const pendingOperations = new Map();
+
+// Cleanup old operations (1 hour retention)
+setInterval(() => {
+  const oneHourAgo = Date.now() - 3600000;
+  for (const [operationId, operation] of pendingOperations.entries()) {
+    if (operation.createdAt < oneHourAgo) {
+      pendingOperations.delete(operationId);
+      console.log(`🧹 Cleaned up operation: ${operationId}`);
+    }
+  }
+}, 300000); // Run every 5 minutes
+
+// ========================================================================
+// PUBLIC ENDPOINTS
 // ========================================================================
 
 /**
@@ -33,10 +56,9 @@ const upload = multer({
 router.get("/health", giftAIController.healthCheck);
 
 /**
- * Generate gift bundle from image
+ * Generate gift bundle from image (SYNCHRONOUS)
  * POST /api/v1/gift-ai/generate-bundle
- * POST /api/v1/gift-ai/generate_gift_bundle (alias for compatibility)
- * Body: multipart/form-data with 'image' file
+ * Timeout: 180 seconds (3 minutes)
  */
 router.post(
   "/generate-bundle",
@@ -44,7 +66,7 @@ router.post(
   giftAIController.generateGiftBundle
 );
 
-// Add alias route for underscore version
+// Alias for compatibility
 router.post(
   "/generate_gift_bundle",
   upload.single("image"),
@@ -52,103 +74,219 @@ router.post(
 );
 
 /**
+ * Generate gift bundle from image (ASYNCHRONOUS)
+ * POST /api/v1/gift-ai/generate-bundle-async
+ * Returns immediately with operation ID
+ */
+router.post(
+  "/generate-bundle-async",
+  upload.single("image"),
+  async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          message: "No image file provided",
+        });
+      }
+
+      // Generate operation ID
+      const operationId = `bundle_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Store initial status
+      pendingOperations.set(operationId, {
+        status: "processing",
+        createdAt: Date.now(),
+        message: "Processing your gift bundle request..."
+      });
+
+      console.log(`🎁 Starting async bundle generation: ${operationId}`);
+
+      // Return immediately
+      res.json({
+        success: true,
+        operationId,
+        status: "processing",
+        statusUrl: `/api/v1/gift-ai/status/${operationId}`,
+        message: "Your request is being processed. Check the status URL for results."
+      });
+
+      // Process in background
+      (async () => {
+        try {
+          // Update status
+          pendingOperations.set(operationId, {
+            status: "processing",
+            createdAt: Date.now(),
+            message: "Analyzing image with AI..."
+          });
+
+          // Call the actual controller logic
+          const giftAIService = require("../services/giftAIService");
+          const result = await giftAIService.generateGiftBundle(
+            req.file.buffer,
+            req.file.originalname
+          );
+
+          if (!result.success) {
+            throw new Error(result.error || "Bundle generation failed");
+          }
+
+          // Enrich bundles (same logic as controller)
+          const Artwork = require("../models/Artwork");
+          const enrichedBundles = await enrichBundlesWithArtworkData(result.data.bundles);
+
+          // Store success result
+          pendingOperations.set(operationId, {
+            status: "completed",
+            createdAt: Date.now(),
+            result: {
+              success: true,
+              bundle_id: result.data.bundle_id,
+              vision: result.data.vision,
+              intent: result.data.intent,
+              bundles: enrichedBundles.bundles,
+              metadata: {
+                ...result.data.metadata,
+                enrichment_stats: enrichedBundles.stats
+              },
+              warnings: enrichedBundles.warnings
+            }
+          });
+
+          console.log(`✅ Async bundle generation completed: ${operationId}`);
+
+        } catch (error) {
+          console.error(`❌ Async bundle generation failed: ${operationId}`, error);
+          
+          pendingOperations.set(operationId, {
+            status: "failed",
+            createdAt: Date.now(),
+            error: error.message || "Unknown error"
+          });
+        }
+      })();
+
+    } catch (error) {
+      console.error("Error starting async operation:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to start async operation",
+        error: error.message,
+      });
+    }
+  }
+);
+
+/**
+ * Check status of async operation
+ * GET /api/v1/gift-ai/status/:operationId
+ */
+router.get("/status/:operationId", (req, res) => {
+  const { operationId } = req.params;
+  
+  const operation = pendingOperations.get(operationId);
+  
+  if (!operation) {
+    return res.status(404).json({
+      success: false,
+      message: "Operation not found or expired",
+      operationId
+    });
+  }
+
+  // Return current status
+  if (operation.status === "completed") {
+    return res.json({
+      success: true,
+      status: "completed",
+      operationId,
+      ...operation.result
+    });
+  } else if (operation.status === "failed") {
+    return res.status(500).json({
+      success: false,
+      status: "failed",
+      operationId,
+      error: operation.error
+    });
+  } else {
+    return res.json({
+      success: true,
+      status: "processing",
+      operationId,
+      message: operation.message || "Processing..."
+    });
+  }
+});
+
+/**
  * Search similar gifts by text query
- * GET /api/v1/gift-ai/search?query=birthday+gift&limit=10
- * POST /api/v1/gift-ai/search_similar_gifts (alias for compatibility)
+ * GET /api/v1/gift-ai/search?query=...&limit=10
+ * POST /api/v1/gift-ai/search_similar_gifts (for compatibility)
  */
 router.get("/search", giftAIController.searchSimilarGifts);
 
-// Add alias route for underscore version
 router.post("/search_similar_gifts", giftAIController.searchSimilarGifts);
 
 // ========================================================================
 // VISION AI ENDPOINTS
 // ========================================================================
 
-/**
- * Analyze craft type from image
- * POST /api/v1/gift-ai/analyze-craft
- * POST /api/v1/gift-ai/analyze_craft (alias for compatibility)
- */
 router.post(
   "/analyze-craft",
   upload.single("image"),
   giftAIController.analyzeCraft
 );
 
-// Add alias route for underscore version
 router.post(
   "/analyze_craft",
   upload.single("image"),
   giftAIController.analyzeCraft
 );
 
-/**
- * Analyze quality from image
- * POST /api/v1/gift-ai/analyze-quality
- * POST /api/v1/gift-ai/analyze_quality (alias for compatibility)
- */
 router.post(
   "/analyze-quality",
   upload.single("image"),
   giftAIController.analyzeQuality
 );
 
-// Add alias route for underscore version
 router.post(
   "/analyze_quality",
   upload.single("image"),
   giftAIController.analyzeQuality
 );
 
-/**
- * Estimate price from image
- * POST /api/v1/gift-ai/estimate-price
- * POST /api/v1/gift-ai/estimate_price (alias for compatibility)
- */
 router.post(
   "/estimate-price",
   upload.single("image"),
   giftAIController.estimatePrice
 );
 
-// Add alias route for underscore version
 router.post(
   "/estimate_price",
   upload.single("image"),
   giftAIController.estimatePrice
 );
 
-/**
- * Detect fraud indicators
- * POST /api/v1/gift-ai/detect-fraud
- * POST /api/v1/gift-ai/detect_fraud (alias for compatibility)
- */
 router.post(
   "/detect-fraud",
   upload.single("image"),
   giftAIController.detectFraud
 );
 
-// Add alias route for underscore version
 router.post(
   "/detect_fraud",
   upload.single("image"),
   giftAIController.detectFraud
 );
 
-/**
- * Detect suitable occasion
- * POST /api/v1/gift-ai/detect-occasion
- * POST /api/v1/gift-ai/detect_occasion (alias for compatibility)
- */
 router.post(
   "/detect-occasion",
   upload.single("image"),
   giftAIController.detectOccasion
 );
 
-// Add alias route for underscore version
 router.post(
   "/detect_occasion",
   upload.single("image"),
@@ -159,61 +297,179 @@ router.post(
 // ADMIN ENDPOINTS (Requires authentication)
 // ========================================================================
 
-/**
- * Refresh vector store (sync MongoDB → Qdrant)
- * POST /api/v1/gift-ai/refresh-vector-store
- * POST /api/v1/gift-ai/refresh_vector_store (alias for compatibility)
- * Requires: Authentication
- */
 router.post(
   "/refresh-vector-store",
   isAuthenticated,
   giftAIController.refreshVectorStore
 );
 
-// Add alias route for underscore version
 router.post(
   "/refresh_vector_store",
   isAuthenticated,
   giftAIController.refreshVectorStore
 );
 
-/**
- * Get vector store information
- * GET /api/v1/gift-ai/vector-store-info
- * GET /api/v1/gift-ai/vector_store_info (alias for compatibility)
- * Requires: Authentication
- */
 router.get(
   "/vector-store-info",
   isAuthenticated,
   giftAIController.getVectorStoreInfo
 );
 
-// Add alias route for underscore version
 router.get(
   "/vector_store_info",
   isAuthenticated,
   giftAIController.getVectorStoreInfo
 );
 
-/**
- * Index a specific artwork
- * POST /api/v1/gift-ai/index-artwork/:artworkId
- * POST /api/v1/gift-ai/index_artwork/:artworkId (alias for compatibility)
- * Requires: Authentication
- */
 router.post(
   "/index-artwork/:artworkId",
   isAuthenticated,
   giftAIController.indexArtwork
 );
 
-// Add alias route for underscore version
 router.post(
   "/index_artwork/:artworkId",
   isAuthenticated,
   giftAIController.indexArtwork
 );
+
+// ========================================================================
+// HELPER FUNCTIONS
+// ========================================================================
+
+/**
+ * Enrich AI bundles with full artwork data from MongoDB
+ */
+async function enrichBundlesWithArtworkData(bundles) {
+  const Artwork = require("../models/Artwork");
+  
+  if (!bundles || !Array.isArray(bundles) || bundles.length === 0) {
+    return {
+      bundles: [],
+      stats: { 
+        total_items: 0, 
+        found_items: 0, 
+        missing_items: 0,
+        bundles_created: 0 
+      },
+      warnings: []
+    };
+  }
+
+  const enriched = [];
+  const warnings = [];
+  const stats = {
+    total_items: 0,
+    found_items: 0,
+    missing_items: 0,
+    bundles_created: 0
+  };
+
+  for (const bundle of bundles) {
+    const enrichedItems = [];
+    const bundleName = bundle.bundle_name || bundle.name || 'Unnamed Bundle';
+
+    if (!bundle.items || !Array.isArray(bundle.items) || bundle.items.length === 0) {
+      warnings.push(`Bundle "${bundleName}" has no items - skipping`);
+      continue;
+    }
+
+    for (const item of bundle.items) {
+      stats.total_items++;
+      
+      try {
+        let artwork = null;
+
+        // Strategy 1: Find by mongo_id
+        if (item.mongo_id) {
+          try {
+            artwork = await Artwork.findById(item.mongo_id)
+              .populate("artistId", "name email avatarUrl");
+          } catch (err) {
+            console.warn(`⚠️ Invalid mongo_id: ${item.mongo_id}`);
+          }
+        }
+
+        // Strategy 2: Find by exact title
+        if (!artwork && item.title) {
+          artwork = await Artwork.findOne({
+            title: item.title,
+            status: "published"
+          }).populate("artistId", "name email avatarUrl");
+        }
+
+        // Strategy 3: Case-insensitive match
+        if (!artwork && item.title) {
+          artwork = await Artwork.findOne({
+            title: new RegExp(`^${escapeRegex(item.title)}$`, 'i'),
+            status: "published"
+          }).populate("artistId", "name email avatarUrl");
+        }
+
+        if (artwork) {
+          stats.found_items++;
+          enrichedItems.push({
+            mongo_id: artwork._id.toString(),
+            title: artwork.title,
+            reason: item.reason || "Recommended for you",
+            price: artwork.price,
+            currency: artwork.currency || "INR",
+            artwork: {
+              _id: artwork._id,
+              title: artwork.title,
+              description: artwork.description,
+              price: artwork.price,
+              currency: artwork.currency,
+              quantity: artwork.quantity,
+              status: artwork.status,
+              tags: artwork.tags || [],
+              media: artwork.media || [],
+              likeCount: artwork.likeCount || 0,
+              artistId: artwork.artistId,
+              createdAt: artwork.createdAt
+            }
+          });
+        } else {
+          stats.missing_items++;
+          const identifier = item.title || item.mongo_id || 'unknown';
+          warnings.push(`Artwork not found: "${identifier}"`);
+        }
+      } catch (error) {
+        stats.missing_items++;
+        const identifier = item.title || item.mongo_id || 'unknown';
+        warnings.push(`Error processing: "${identifier}" - ${error.message}`);
+      }
+    }
+
+    if (enrichedItems.length > 0) {
+      const totalPrice = enrichedItems.reduce(
+        (sum, item) => sum + (item.price || 0),
+        0
+      );
+
+      enriched.push({
+        ...bundle,
+        items: enrichedItems,
+        total_price: totalPrice,
+        item_count: enrichedItems.length,
+        original_item_count: bundle.items.length
+      });
+      
+      stats.bundles_created++;
+    } else {
+      warnings.push(`Bundle "${bundleName}" excluded - no valid items found`);
+    }
+  }
+
+  return {
+    bundles: enriched,
+    stats,
+    warnings: warnings.length > 0 ? warnings : undefined
+  };
+}
+
+function escapeRegex(string) {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 module.exports = router;

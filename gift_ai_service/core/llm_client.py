@@ -1,146 +1,160 @@
+# gift_ai_service/core/llm_client.py
 """
-LLM Client - Gemini + Ollama Fallback
+LLM Client - Unified interface for different LLM providers
+Supports: Google Gemini, Anthropic Claude, OpenAI GPT
 """
+
 import os
 import logging
-import google.generativeai as genai
-import requests
 from typing import Optional, Dict, Any
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("gift_ai.llm_client")
 
 class LLMClient:
-    """Unified LLM client with Gemini primary and Ollama fallback"""
+    """Unified LLM client with fallback support"""
     
-    def __init__(self, model_name: str = "gemini-2.5-flash"):
-        self.model_name = model_name
+    def __init__(self):
+        self.google_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        self.anthropic_api_key = os.getenv("ANTHROPIC_API_KEY")
+        self.openai_api_key = os.getenv("OPENAI_API_KEY")
         
-        # FIXED: Try multiple sources for API key
-        self.api_key = (
-            os.getenv("GOOGLE_API_KEY") or 
-            os.getenv("GEMINI_API_KEY") or
-            os.environ.get("GOOGLE_API_KEY") or
-            os.environ.get("GEMINI_API_KEY")
-        )
+        self.genai = None
+        self.anthropic = None
+        self.openai = None
         
-        # Debug logging
-        if self.api_key:
-            logger.info(f"🔑 API Key loaded: {self.api_key[:15]}...")
-        else:
-            logger.error("❌ NO API KEY FOUND - Checked: GOOGLE_API_KEY, GEMINI_API_KEY")
-            logger.error(f"   Environment vars: {list(os.environ.keys())[:10]}...")
+        self._initialize_providers()
+    
+    def _initialize_providers(self):
+        """Initialize available LLM providers"""
         
-        # Initialize Gemini
-        self.gemini_model = None
-        if self.api_key:
+        # Try Google Gemini first (preferred)
+        if self.google_api_key:
             try:
-                genai.configure(api_key=self.api_key)
-                
-                # Try different model names
-                model_names = [
-                    'gemini-2.5-flash',
-                    'gemini-2.0-flash',
-                    'gemini-pro-latest',
-                    'gemini-flash-latest',
-                    'gemini-2.5-pro',
-                ]
-                
-                for name in model_names:
-                    try:
-                        self.gemini_model = genai.GenerativeModel(name)
-                        logger.info(f"✅ Gemini initialized with: {name}")
-                        self.model_name = name
-                        break
-                    except Exception as e:
-                        logger.debug(f"Failed to init {name}: {e}")
-                        continue
-                
-                if not self.gemini_model:
-                    logger.warning("⚠️ No suitable Gemini model found")
-                    
+                import google.generativeai as genai
+                genai.configure(api_key=self.google_api_key)
+                self.genai = genai
+                logger.info("✅ Google Gemini initialized")
             except Exception as e:
-                logger.error(f"Gemini init failed: {e}")
-                self.gemini_model = None
-        else:
-            logger.warning("⚠️ No Gemini API key")
+                logger.warning(f"⚠️ Gemini initialization failed: {e}")
         
-        # Check Ollama availability
-        self.ollama_available = self._check_ollama()
+        # Try Anthropic Claude
+        if self.anthropic_api_key:
+            try:
+                import anthropic
+                self.anthropic = anthropic.Anthropic(api_key=self.anthropic_api_key)
+                logger.info("✅ Anthropic Claude initialized")
+            except Exception as e:
+                logger.warning(f"⚠️ Claude initialization failed: {e}")
         
-        logger.info(f"Gemini LLM client initialized with {self.model_name}")
+        # Try OpenAI
+        if self.openai_api_key:
+            try:
+                from openai import OpenAI
+                self.openai = OpenAI(api_key=self.openai_api_key)
+                logger.info("✅ OpenAI initialized")
+            except Exception as e:
+                logger.warning(f"⚠️ OpenAI initialization failed: {e}")
+        
+        if not any([self.genai, self.anthropic, self.openai]):
+            logger.error("❌ No LLM providers available!")
     
-    def _check_ollama(self) -> bool:
-        """Check if Ollama is available with llama3.2:3b"""
-        try:
-            response = requests.get('http://localhost:11434/api/tags', timeout=5)
-            if response.status_code == 200:
-                models = response.json().get('models', [])
-                # Check for llama3.2 specifically
-                has_llama = any(
-                    'llama3.2' in m.get('name', '').lower() 
-                    for m in models
-                )
-                if has_llama:
-                    logger.info("✅ Ollama llama3.2 available as fallback")
-                    return True
-                else:
-                    available = [m.get('name') for m in models]
-                    logger.warning(f"⚠️ llama3.2 not found. Available: {available}")
-        except Exception as e:
-            logger.debug(f"Ollama check failed: {e}")
-        
-        return False
-    
-    async def generate_text(self, prompt: str, **kwargs) -> str:
+    async def generate_text(
+        self, 
+        prompt: str, 
+        max_tokens: int = 1000,
+        temperature: float = 0.7,
+        prefer_provider: Optional[str] = None
+    ) -> str:
         """
-        Generate text with Gemini → Ollama fallback
+        Generate text using available LLM provider
+        
+        Args:
+            prompt: Text prompt
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature (0.0-1.0)
+            prefer_provider: "gemini", "claude", or "openai" (optional)
+        
+        Returns:
+            Generated text
         """
-        # Try Gemini first
-        if self.gemini_model:
-            try:
-                response = self.gemini_model.generate_content(prompt)
-                return response.text
-            except Exception as e:
-                logger.warning(f"⚠️ Gemini failed, trying Ollama: {e}")
+        
+        # Try preferred provider first if specified
+        if prefer_provider == "gemini" and self.genai:
+            return await self._generate_gemini(prompt, max_tokens, temperature)
+        elif prefer_provider == "claude" and self.anthropic:
+            return await self._generate_claude(prompt, max_tokens, temperature)
+        elif prefer_provider == "openai" and self.openai:
+            return await self._generate_openai(prompt, max_tokens, temperature)
+        
+        # Default priority: Gemini -> Claude -> OpenAI
+        if self.genai:
+            return await self._generate_gemini(prompt, max_tokens, temperature)
+        elif self.anthropic:
+            return await self._generate_claude(prompt, max_tokens, temperature)
+        elif self.openai:
+            return await self._generate_openai(prompt, max_tokens, temperature)
         else:
-            logger.warning("⚠️ Gemini failed, trying Ollama: No Gemini API key")
-        
-        # Fallback to Ollama
-        if self.ollama_available:
-            try:
-                return self._generate_ollama(prompt)
-            except Exception as e:
-                logger.error(f"Ollama failed: {e}")
-                raise Exception(f"❌ All LLMs failed: {e}")
-        
-        raise Exception("No LLM available")
+            raise Exception("No LLM provider available")
     
-    def _generate_ollama(self, prompt: str) -> str:
-        """Generate text using Ollama llama3.2:3b"""
+    async def _generate_gemini(self, prompt: str, max_tokens: int, temperature: float) -> str:
+        """Generate using Google Gemini"""
         try:
-            response = requests.post(
-                'http://localhost:11434/api/generate',
-                json={
-                    'model': 'llama3.2:3b',  # ✅ FIXED: Use correct model name
-                    'prompt': prompt,
-                    'stream': False,
-                    'options': {
-                        'temperature': 0.7,
-                        'top_p': 0.9,
-                    }
-                },
-                timeout=60
+            model = self.genai.GenerativeModel('gemini-1.5-flash-001')
+            response = model.generate_content(
+                prompt,
+                generation_config={
+                    'max_output_tokens': max_tokens,
+                    'temperature': temperature,
+                }
             )
-            
-            if response.status_code == 200:
-                result = response.json()
-                return result.get('response', '')
-            else:
-                raise Exception(f"Ollama error: {response.status_code} - {response.text}")
-                
-        except requests.exceptions.Timeout:
-            raise Exception("Ollama timeout (60s)")
-        except requests.exceptions.ConnectionError:
-            raise Exception("Ollama not running (connection refused)")
+            return response.text
         except Exception as e:
-            raise Exception(f"Ollama error: {str(e)}")
+            logger.error(f"Gemini generation failed: {e}")
+            raise
+    
+    async def _generate_claude(self, prompt: str, max_tokens: int, temperature: float) -> str:
+        """Generate using Anthropic Claude"""
+        try:
+            message = self.anthropic.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return message.content[0].text
+        except Exception as e:
+            logger.error(f"Claude generation failed: {e}")
+            raise
+    
+    async def _generate_openai(self, prompt: str, max_tokens: int, temperature: float) -> str:
+        """Generate using OpenAI"""
+        try:
+            response = self.openai.chat.completions.create(
+                model="gpt-4o-mini",
+                max_tokens=max_tokens,
+                temperature=temperature,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"OpenAI generation failed: {e}")
+            raise
+    
+    def get_available_providers(self) -> list[str]:
+        """Get list of available LLM providers"""
+        providers = []
+        if self.genai:
+            providers.append("gemini")
+        if self.anthropic:
+            providers.append("claude")
+        if self.openai:
+            providers.append("openai")
+        return providers
+    
+    def is_available(self) -> bool:
+        """Check if any LLM provider is available"""
+        return any([self.genai, self.anthropic, self.openai])

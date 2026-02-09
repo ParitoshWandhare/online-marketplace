@@ -1,74 +1,84 @@
 # gift_ai_service/core/config.py
 """
-Unified Configuration using Pydantic Settings
-Supports both Member A and Member B requirements
+Configuration Management for Gift AI Service
+Loads settings from environment variables with validation
 """
 
-from pydantic_settings import BaseSettings
+import os
 from typing import Optional
+from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
+# Load .env file
+load_dotenv()
 
 class Settings(BaseSettings):
-    # MongoDB - Primary naming
-    MONGO_URI: str = "mongodb://localhost:27017/test"
-    DATABASE_NAME: str = "test"
-    COLLECTION_NAME: str = "artworks"
+    """Application settings loaded from environment variables"""
     
-    # Alternative naming (auto-synced)
-    MONGODB_URL: Optional[str] = None
-    MONGO_DB: Optional[str] = None
-    MONGO_COLLECTION: Optional[str] = None
-
-    # LLM APIs
-    GEMINI_API_KEY: Optional[str] = None
-    OPENAI_API_KEY: Optional[str] = None
-    GOOGLE_API_KEY: Optional[str] = None
-    LLM_MODEL: str = "gemini-1.5-flash-001"
-
-    # Vector DB (Qdrant)
-    QDRANT_URL: str = "http://localhost:6333"
-    QDRANT_API_KEY: Optional[str] = None
+    # ========================================
+    # Google AI / Gemini
+    # ========================================
+    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", os.getenv("GEMINI_API_KEY", ""))
     
-    # Microservices URLs
-    LANGUAGE_SERVICE_URL: str = "http://127.0.0.1:8001"
-    VECTOR_SERVICE_URL: str = "http://127.0.0.1:8002"
-    VISION_AI_SERVICE_URL: str = "http://127.0.0.1:8001"
+    # ========================================
+    # MongoDB
+    # ========================================
+    MONGODB_URL: str = os.getenv("MONGODB_URL", "")
+    DATABASE_NAME: str = os.getenv("DATABASE_NAME", "orchid_db")
+    COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "artworks")
     
-    # App Config
-    ENVIRONMENT: str = "development"
-    LOG_LEVEL: str = "INFO"
-    PORT: int = 8001
-
+    # ========================================
+    # Qdrant Vector Database
+    # ========================================
+    QDRANT_URL: str = os.getenv("QDRANT_URL", "")
+    QDRANT_API_KEY: Optional[str] = os.getenv("QDRANT_API_KEY", None)
+    QDRANT_COLLECTION: str = os.getenv("QDRANT_COLLECTION", "gift_items")
+    
+    # ========================================
+    # Optional: Alternative LLM Providers
+    # ========================================
+    ANTHROPIC_API_KEY: Optional[str] = os.getenv("ANTHROPIC_API_KEY", None)
+    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", None)
+    
+    # ========================================
+    # Server Configuration
+    # ========================================
+    PORT: int = int(os.getenv("PORT", "8001"))
+    HOST: str = os.getenv("HOST", "0.0.0.0")
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "info")
+    
+    # ========================================
+    # Feature Flags
+    # ========================================
+    LAZY_INITIALIZATION: bool = os.getenv("LAZY_INITIALIZATION", "true").lower() == "true"
+    
     class Config:
         env_file = ".env"
-        case_sensitive = False
-        extra = "allow"  # Allows extra fields
-        
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        
-        # Sync MONGODB_URL ↔ MONGO_URI
-        if not self.MONGODB_URL:
-            self.MONGODB_URL = self.MONGO_URI
-        elif self.MONGODB_URL != self.MONGO_URI:
-            self.MONGO_URI = self.MONGODB_URL
-            
-        # Sync DATABASE_NAME ↔ MONGO_DB
-        if not self.MONGO_DB:
-            self.MONGO_DB = self.DATABASE_NAME
-        elif self.MONGO_DB != self.DATABASE_NAME:
-            self.DATABASE_NAME = self.MONGO_DB
-            
-        # Sync COLLECTION_NAME ↔ MONGO_COLLECTION
-        if not self.MONGO_COLLECTION:
-            self.MONGO_COLLECTION = self.COLLECTION_NAME
-        elif self.MONGO_COLLECTION != self.COLLECTION_NAME:
-            self.COLLECTION_NAME = self.MONGO_COLLECTION
-            
-        # Sync API keys (GOOGLE_API_KEY ↔ GEMINI_API_KEY)
-        if self.GOOGLE_API_KEY and not self.GEMINI_API_KEY:
-            self.GEMINI_API_KEY = self.GOOGLE_API_KEY
-        elif self.GEMINI_API_KEY and not self.GOOGLE_API_KEY:
-            self.GOOGLE_API_KEY = self.GEMINI_API_KEY
+        env_file_encoding = "utf-8"
+        case_sensitive = True
 
-# Singleton instance
+    def validate_critical_settings(self) -> list[str]:
+        """Validate that critical settings are present"""
+        missing = []
+        
+        if not self.GOOGLE_API_KEY:
+            missing.append("GOOGLE_API_KEY or GEMINI_API_KEY")
+        
+        if not self.MONGODB_URL:
+            missing.append("MONGODB_URL")
+        
+        if not self.QDRANT_URL:
+            missing.append("QDRANT_URL")
+        
+        return missing
+
+# Create global settings instance
 settings = Settings()
+
+# Validate on import (but don't fail - let lazy init handle it)
+missing_vars = settings.validate_critical_settings()
+if missing_vars:
+    import logging
+    logger = logging.getLogger("gift_ai.config")
+    logger.warning(f"⚠️ Missing environment variables: {', '.join(missing_vars)}")
+    logger.warning("⚠️ Some features may not work until these are configured")

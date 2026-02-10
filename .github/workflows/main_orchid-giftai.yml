@@ -43,13 +43,21 @@ jobs:
           echo "Checking main.py exists:"
           test -f main.py && echo "✅ main.py found" || echo "❌ main.py NOT found"
 
-      - name: Upload Python app artifact
+      # KEY FIX: Zip the contents (not as .tar.gz artifact) for Azure deployment
+      - name: Zip artifact for deployment
+        working-directory: gift_ai_service
+        run: |
+          # Remove the venv before zipping - Azure will reinstall via oryx
+          rm -rf antenv
+          zip -r ../giftai-deploy.zip . -x "*.pyc" -x "__pycache__/*" -x ".git/*"
+          echo "✅ Created giftai-deploy.zip"
+          ls -lh ../giftai-deploy.zip
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: |
-            gift_ai_service/
-            !gift_ai_service/antenv/
+          path: giftai-deploy.zip
 
   deploy:
     runs-on: ubuntu-latest
@@ -63,30 +71,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: python-app
-          # Download to current directory (will contain gift_ai_service folder)
 
-      - name: Prepare deployment package
+      - name: Verify downloaded artifact
         run: |
-          echo "📂 Artifact contents:"
+          echo "📂 Downloaded artifact contents:"
           ls -la
-          
-          # Move contents of gift_ai_service to root for deployment
-          if [ -d "gift_ai_service" ]; then
-            echo "Moving files from gift_ai_service/ to root..."
-            mv gift_ai_service/* .
-            mv gift_ai_service/.[!.]* . 2>/dev/null || true
-            rmdir gift_ai_service
-          fi
-          
-          echo ""
-          echo "📦 Final deployment package:"
-          ls -la
-          
-          echo ""
-          echo "Verification:"
-          test -f main.py && echo "✅ main.py found" || echo "❌ main.py NOT found"
-          test -f startup.sh && echo "✅ startup.sh found" || echo "❌ startup.sh NOT found"
-          test -f requirements.txt && echo "✅ requirements.txt found" || echo "❌ requirements.txt NOT found"
+          test -f giftai-deploy.zip && echo "✅ giftai-deploy.zip found" || echo "❌ giftai-deploy.zip NOT found"
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -100,7 +90,7 @@ jobs:
         with:
           app-name: 'orchid-giftai'
           slot-name: 'Production'
-          package: .
+          package: giftai-deploy.zip
 
       - name: Deployment complete
         run: |

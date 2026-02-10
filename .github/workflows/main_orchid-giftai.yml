@@ -1,6 +1,6 @@
-# # Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
-# # More GitHub Actions for Azure: https://github.com/Azure/actions
-# # More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
+# Docs for the Azure Web Apps Deploy action: https://github.com/Azure/webapps-deploy
+# More GitHub Actions for Azure: https://github.com/Azure/actions
+# More info on Python, GitHub Actions, and Azure App Service: https://aka.ms/python-webapps-actions
 
 name: Build and deploy Python app to Azure Web App - orchid-giftai
 
@@ -33,12 +33,22 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Verify build
+        working-directory: gift_ai_service
+        run: |
+          echo "📦 Build verification:"
+          echo "Files in gift_ai_service:"
+          ls -la
+          echo ""
+          echo "Checking main.py exists:"
+          test -f main.py && echo "✅ main.py found" || echo "❌ main.py NOT found"
+
       - name: Upload Python app artifact
         uses: actions/upload-artifact@v4
         with:
           name: python-app
           path: |
-            gift_ai_service
+            gift_ai_service/
             !gift_ai_service/antenv/
 
   deploy:
@@ -53,7 +63,30 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: python-app
-          path: gift_ai_service
+          # Download to current directory (will contain gift_ai_service folder)
+
+      - name: Prepare deployment package
+        run: |
+          echo "📂 Artifact contents:"
+          ls -la
+          
+          # Move contents of gift_ai_service to root for deployment
+          if [ -d "gift_ai_service" ]; then
+            echo "Moving files from gift_ai_service/ to root..."
+            mv gift_ai_service/* .
+            mv gift_ai_service/.[!.]* . 2>/dev/null || true
+            rmdir gift_ai_service
+          fi
+          
+          echo ""
+          echo "📦 Final deployment package:"
+          ls -la
+          
+          echo ""
+          echo "Verification:"
+          test -f main.py && echo "✅ main.py found" || echo "❌ main.py NOT found"
+          test -f startup.sh && echo "✅ startup.sh found" || echo "❌ startup.sh NOT found"
+          test -f requirements.txt && echo "✅ requirements.txt found" || echo "❌ requirements.txt NOT found"
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -67,76 +100,10 @@ jobs:
         with:
           app-name: 'orchid-giftai'
           slot-name: 'Production'
-          package: gift_ai_service
-          
+          package: .
 
-# Azure Web Apps Deploy - Python App
-# name: Build and deploy Python app to Azure Web App - orchid-giftai
-
-# on:
-#   push:
-#     branches:
-#       - main
-#   workflow_dispatch:
-
-# jobs:
-#   build:
-#     runs-on: ubuntu-latest
-#     permissions:
-#       contents: read
-
-#     steps:
-#       - name: Checkout repository
-#         uses: actions/checkout@v4
-
-#       - name: Set up Python (Azure-supported)
-#         uses: actions/setup-python@v5
-#         with:
-#           python-version: '3.12'
-
-#       - name: Create venv and install dependencies
-#         working-directory: gift_ai_service
-#         run: |
-#           python -m venv antenv
-#           source antenv/bin/activate
-#           pip install --upgrade pip
-#           pip install -r requirements.txt
-
-#       - name: Upload Python app artifact
-#         uses: actions/upload-artifact@v4
-#         with:
-#           name: python-app
-#           path: |
-#             gift_ai_service
-#             !gift_ai_service/antenv/
-
-#   deploy:
-#     runs-on: ubuntu-latest
-#     needs: build
-#     permissions:
-#       id-token: write
-#       contents: read
-
-#     steps:
-#       - name: Download artifact
-#         uses: actions/download-artifact@v4
-#         with:
-#           name: python-app
-#           path: gift_ai_service
-
-#       - name: Login to Azure
-#         uses: azure/login@v2
-#         with:
-#           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_AA8327805EAD43E1B84AD636815C8894 }}
-#           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_1B8A202252704D338637E84D39D7CCBB }}
-#           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_7B1842FE0F7B45DA989A0C6682B7A72F }}
-
-#       - name: Wait to avoid SCM restarts
-#         run: sleep 10
-
-#       - name: Deploy to Azure Web App
-#         uses: azure/webapps-deploy@v3
-#         with:
-#           app-name: 'orchid-giftai'
-#           slot-name: 'Production'
-#           package: gift_ai_service
+      - name: Deployment complete
+        run: |
+          echo "✅ Deployment completed"
+          echo "🔗 Service URL: https://orchid-giftai-f6fxg6gwdbg0a2hd.centralindia-01.azurewebsites.net"
+          echo "📊 Check health: https://orchid-giftai-f6fxg6gwdbg0a2hd.centralindia-01.azurewebsites.net/health"

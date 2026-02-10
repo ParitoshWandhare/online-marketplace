@@ -1,5 +1,4 @@
-# Gift AI Service - Python Dependencies
-# Updated for optimized performance
+# Gift AI Service - Python Dependencies (Optimized for Azure)
 
 # ========================================
 # Core Web Framework
@@ -11,20 +10,15 @@ python-multipart==0.0.19
 python-dotenv==1.0.1
 
 # ========================================
-# LLM & AI Services
+# LLM & AI Services (Only Gemini - used)
 # ========================================
 google-generativeai==0.8.3
-anthropic==0.40.0
-openai==1.57.4
 
 # ========================================
 # Database & Vector Store
 # ========================================
-# MongoDB async driver
 motor==3.6.0
 pymongo==4.9.1
-
-# Qdrant vector database
 qdrant-client==1.12.1
 
 # ========================================
@@ -47,15 +41,5 @@ requests==2.32.3
 # ========================================
 # Utilities
 # ========================================
-# For better async support
 aiofiles==24.1.0
-
-# Logging and monitoring
 python-json-logger==3.2.1
-
-# ========================================
-# Production Server
-# ========================================
-# Already included above but listed for clarity:
-# - gunicorn: Production WSGI server
-# - uvicorn: ASGI server with UvicornWorker

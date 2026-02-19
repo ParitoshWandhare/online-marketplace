@@ -203,6 +203,7 @@ A root `docker-compose.yml` is present for multi-service orchestration. Before p
 
 ## 🤝 Team
 
-- Paritosh
-- Omshree
-- Prajakta
+- Paritosh Wandhare  [https://github.com/ParitoshWandhare]
+- Omshree Kenjale  [https://github.com/OHK08]
+- Prajakta Joshi  [https://github.com/Prajakta2005]
+

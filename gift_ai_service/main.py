@@ -1115,10 +1115,10 @@ class VectorStore:
     async def setup_collection(self) -> bool:
         """Create Qdrant collection if needed"""
         try:
-            collections = self.qdrant_client.get_collections()
-            exists = any(col.name == self.collection_name for col in collections.collections)
+            collections_response = self.qdrant_client.get_collections()
+            existing_names = [col.name for col in collections_response.collections]
             
-            if not exists:
+            if self.collection_name not in existing_names:
                 self.qdrant_client.create_collection(
                     collection_name=self.collection_name,
                     vectors_config=VectorParams(size=768, distance=Distance.COSINE)

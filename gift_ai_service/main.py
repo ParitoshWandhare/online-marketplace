@@ -1106,7 +1106,7 @@ class VectorStore:
 
     async def get_mongo_items(self, limit: int = 100) -> List[Dict]:
         """Fetch published items from MongoDB"""
-        if not self.mongo_collection:
+        if self.mongo_collection is None:
             raise Exception("MongoDB not connected")
 
         cursor = self.mongo_collection.find({"status": "published"}).limit(limit)

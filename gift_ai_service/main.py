@@ -1726,6 +1726,33 @@ async def refresh_vector_store():
     else:
         raise HTTPException(500, result.get("error", "Unknown error"))
 
+@app.get("/vector_store_info")
+async def vector_store_info():
+    """Get vector store collection info"""
+    orch = await get_orchestrator()
+    try:
+        await orch.ensure_initialized()
+        collections = orch.vector_store.qdrant_client.get_collections()
+        collection_name = orch.vector_store.collection_name
+        
+        exists = any(col.name == collection_name for col in collections.collections)
+        if not exists:
+            return {
+                "success": False,
+                "error": "Not Found",
+                "message": f"Collection '{collection_name}' does not exist. Run /refresh_vector_store first."
+            }
+        
+        info = orch.vector_store.qdrant_client.get_collection(collection_name)
+        return {
+            "success": True,
+            "collection": collection_name,
+            "vectors_count": info.vectors_count,
+            "status": str(info.status)
+        }
+    except Exception as e:
+        raise HTTPException(500, str(e))
+    
 # ========================================================================
 # VISION AI ENDPOINTS (All Direct - Supports Both Naming Styles)
 # ========================================================================

@@ -215,30 +215,52 @@ class VectorStore:
             logger.error(f"❌ Error fetching MongoDB items: {e}")
             raise
 
-    async def setup_collection(self, collection_name: str = None) -> bool:
-        """Create Qdrant collection if it doesn't exist"""
-        if self.qdrant_client is None:
-            error_msg = "Qdrant not connected - cannot setup collection"
-            logger.error(f"❌ {error_msg}")
-            raise Exception(error_msg)
+    # async def setup_collection(self, collection_name: str = None) -> bool:
+    #     """Create Qdrant collection if it doesn't exist"""
+    #     if self.qdrant_client is None:
+    #         error_msg = "Qdrant not connected - cannot setup collection"
+    #         logger.error(f"❌ {error_msg}")
+    #         raise Exception(error_msg)
             
-        collection_name = collection_name or self.collection_name
+    #     collection_name = collection_name or self.collection_name
         
+    #     try:
+    #         # Check if exists
+    #         collections = self.qdrant_client.get_collections()
+    #         exists = any(col.name == collection_name for col in collections.collections)
+            
+    #         if exists:
+    #             logger.info(f"✅ Collection '{collection_name}' already exists")
+    #             return True
+            
+    #         # Create new collection (768-dim for Gemini/Ollama, auto-pads if needed)
+    #         self.qdrant_client.create_collection(
+    #             collection_name=collection_name,
+    #             vectors_config=VectorParams(size=768, distance=Distance.COSINE)
+    #         )
+    #         logger.info(f"✅ Created Qdrant collection: {collection_name}")
+    #         return True
+    #     except Exception as e:
+    #         logger.error(f"❌ Collection setup failed: {e}")
+    #         raise
+
+    async def setup_collection(self, collection_name: str = None) -> bool:
+        collection_name = collection_name or self.collection_name
+    
         try:
-            # Check if exists
-            collections = self.qdrant_client.get_collections()
-            exists = any(col.name == collection_name for col in collections.collections)
+            collections_response = self.qdrant_client.get_collections()
+            # FIX: compare list directly, don't bool-check the response object
+            existing_names = [col.name for col in collections_response.collections]
             
-            if exists:
+            if collection_name not in existing_names:
+                self.qdrant_client.create_collection(
+                    collection_name=collection_name,
+                    vectors_config=VectorParams(size=768, distance=Distance.COSINE)
+                )
+                logger.info(f"✅ Created Qdrant collection: {collection_name}")
+            else:
                 logger.info(f"✅ Collection '{collection_name}' already exists")
-                return True
             
-            # Create new collection (768-dim for Gemini/Ollama, auto-pads if needed)
-            self.qdrant_client.create_collection(
-                collection_name=collection_name,
-                vectors_config=VectorParams(size=768, distance=Distance.COSINE)
-            )
-            logger.info(f"✅ Created Qdrant collection: {collection_name}")
             return True
         except Exception as e:
             logger.error(f"❌ Collection setup failed: {e}")

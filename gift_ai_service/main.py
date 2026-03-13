@@ -60,17 +60,19 @@ logger = logging.getLogger("gift_ai.main")
 # MODEL FALLBACK CHAIN
 # FIXED: v1-compatible model names (old bare names only worked on deprecated v1beta)
 # ========================================================================
-# IMPORTANT: gemini-2.0-* exhausted this key's free-tier quota (limit: 0).
-# gemini-1.5-flash-latest / gemini-1.5-pro-latest only work on v1 REST — not v1beta.
-# We call the v1 endpoint directly (see _call_gemini_v1 below).
+# MODEL CHAIN — AI Studio keys use v1beta endpoint (not v1).
+# DO NOT use: gemini-2.0-* (quota exhausted on free tier)
+# DO NOT use: -latest suffix (404 on v1beta)
+# DO NOT use: v1 REST endpoint (404 for AI Studio keys — only Vertex AI keys work there)
+# CORRECT: bare 1.5 model names via genai library (which correctly uses v1beta)
 GEMINI_MODEL_CHAIN = [
-    "gemini-1.5-flash-8b",   # highest free RPM (1000/min), smallest
-    "gemini-1.5-flash",      # 500 RPM free
-    "gemini-1.5-pro",        # 50 RPM free, most capable
+    "gemini-1.5-flash-8b",   # smallest, 1000 RPM free on v1beta
+    "gemini-1.5-flash",      # 500 RPM free on v1beta
+    "gemini-1.5-pro",        # 50 RPM free on v1beta, most capable
 ]
 
-# Direct v1 REST endpoint — bypasses genai library v1beta routing entirely
-GEMINI_V1_BASE = "https://generativelanguage.googleapis.com/v1/models"
+# v1beta REST base (AI Studio keys only work here, NOT on /v1/)
+GEMINI_V1BETA_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 # ========================================================================
 # RECIPIENT-AWARE FILTERING HELPERS
@@ -130,82 +132,62 @@ def _filter_items_by_recipient(items: List[Dict], user_intent: str) -> List[Dict
 # ========================================================================
 class VisionAIClient:
     """
-    Vision AI client — calls Gemini v1 REST directly (no genai library).
-    FIXED: library routes through deprecated v1beta regardless of version.
-    Vision model chain uses only models with free-tier quota on v1 endpoint.
+    Vision AI client using genai library (v1beta) with correct model names.
+    AI Studio keys ONLY work on v1beta. Use bare 1.5 model names (no -latest suffix,
+    no 2.0 models which have exhausted free-tier quota).
     """
 
     VISION_MODEL_CHAIN = [
-        "gemini-1.5-flash-8b",  # multimodal, highest free RPM
-        "gemini-1.5-flash",     # multimodal, 500 RPM free
-        "gemini-1.5-pro",       # multimodal, 50 RPM free
+        "gemini-1.5-flash-8b",  # multimodal, 1000 RPM free on v1beta
+        "gemini-1.5-flash",     # multimodal, 500 RPM free on v1beta
+        "gemini-1.5-pro",       # multimodal, 50 RPM free on v1beta
     ]
 
     def __init__(self):
         self.gemini_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
+        self.gemini_model = None
+        self.gemini_model_name = None
+
         if self.gemini_api_key:
-            logger.info("✅ VisionAIClient ready (direct v1 REST)")
+            try:
+                genai.configure(api_key=self.gemini_api_key)
+                for name in self.VISION_MODEL_CHAIN:
+                    try:
+                        self.gemini_model = genai.GenerativeModel(name)
+                        self.gemini_model_name = name
+                        logger.info(f"✅ VisionAIClient initialized with: {name}")
+                        break
+                    except Exception:
+                        continue
+                if not self.gemini_model:
+                    logger.error("❌ All vision models failed to initialize")
+            except Exception as e:
+                logger.error(f"❌ VisionAIClient init failed: {e}")
         else:
             logger.warning("⚠️ No Gemini API key found")
 
     async def analyze_image(self, image_bytes: bytes, prompt: str) -> str:
-        """Analyze image using Gemini Vision via v1 REST — tries models in order."""
-        import httpx, base64
+        """Analyze image using Gemini Vision (genai library, v1beta endpoint)."""
+        if not self.gemini_model:
+            raise Exception("Gemini Vision not configured — check GOOGLE_API_KEY")
 
-        if not self.gemini_api_key:
-            raise Exception("No Gemini API key — check GOOGLE_API_KEY env var")
-
-        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
-        # Detect image mime type
-        mime_type = "image/jpeg"
-        if image_bytes[:4] == b"\x89PNG":
-            mime_type = "image/png"
-        elif image_bytes[:4] == b"RIFF":
-            mime_type = "image/webp"
-
-        body = {
-            "contents": [{
-                "parts": [
-                    {"text": prompt},
-                    {"inlineData": {"mimeType": mime_type, "data": image_b64}},
-                ]
-            }],
-            "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.4},
-        }
-
-        last_error = None
         for model_name in self.VISION_MODEL_CHAIN:
-            url = f"{GEMINI_V1_BASE}/{model_name}:generateContent?key={self.gemini_api_key}"
             try:
-                async with httpx.AsyncClient(timeout=90.0) as client:
-                    resp = await client.post(url, json=body)
-
-                if resp.status_code == 429:
-                    logger.warning(f"⚠️ Vision model '{model_name}' 429 quota exceeded, trying next")
-                    last_error = Exception(f"429 {model_name}")
-                    continue
-                if resp.status_code == 404:
-                    logger.warning(f"⚠️ Vision model '{model_name}' 404 not found on v1, trying next")
-                    last_error = Exception(f"404 {model_name}")
-                    continue
-                if resp.status_code != 200:
-                    err = resp.json().get("error", {}).get("message", resp.text)
-                    raise Exception(f"Vision API {resp.status_code}: {err}")
-
-                data = resp.json()
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
+                model = genai.GenerativeModel(model_name)
+                image = Image.open(io.BytesIO(image_bytes))
+                response = model.generate_content([prompt, image])
+                if not response or not response.text:
+                    raise Exception("Empty response from Gemini Vision")
                 logger.info(f"✅ Vision analysis complete via {model_name}")
-                return text
-
+                return response.text
             except Exception as e:
-                if "429" in str(e) or "404" in str(e):
-                    last_error = e
+                if "429" in str(e) or "quota" in str(e).lower():
+                    logger.warning(f"⚠️ Vision model '{model_name}' 429 quota, trying next")
                     continue
                 logger.error(f"Vision error with '{model_name}': {e}")
-                last_error = e
-                continue
+                raise Exception(f"Vision analysis failed: {e}")
 
-        raise Exception(f"All vision models failed. Last error: {last_error}")
+        raise Exception("All vision models quota exceeded")
 
 
 # ========================================================================
@@ -471,61 +453,40 @@ class GiftBundleService:
             except Exception:
                 pass
 
-    async def _call_gemini_v1(self, prompt: str) -> Dict:
+    def _call_gemini(self, prompt: str) -> Dict:
         """
-        Call Gemini v1 REST API directly — bypasses genai library v1beta routing.
-        Tries each model in GEMINI_MODEL_CHAIN. On 429, moves to next model immediately
-        (free-tier quota may be permanently 0 for that model, not just rate-limited).
+        Try each model in GEMINI_MODEL_CHAIN using the genai library (v1beta endpoint).
+        AI Studio keys ONLY work on v1beta — not on the v1 REST endpoint.
+        Models: gemini-1.5-flash-8b → gemini-1.5-flash → gemini-1.5-pro
+        DO NOT use gemini-2.0-* (quota exhausted) or -latest suffix (404 on v1beta).
         """
-        import httpx, re
-        api_key = self.google_api_key
+        import re
         last_error = None
 
+        if not self.genai:
+            raise Exception("Gemini not initialized — check GOOGLE_API_KEY")
+
         for model_name in GEMINI_MODEL_CHAIN:
-            url = f"{GEMINI_V1_BASE}/{model_name}:generateContent?key={api_key}"
-            body = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.7},
-            }
             try:
-                async with httpx.AsyncClient(timeout=60.0) as client:
-                    resp = await client.post(url, json=body)
+                model = self.genai.GenerativeModel(model_name)
+                response = model.generate_content(
+                    prompt,
+                    generation_config={"max_output_tokens": 2048, "temperature": 0.7},
+                )
+                text = response.text
 
-                if resp.status_code == 429:
-                    logger.warning(f"⚠️ Model '{model_name}' failed: 429 quota exceeded, skipping")
-                    last_error = Exception(f"429 {model_name}")
-                    continue
-                if resp.status_code == 404:
-                    logger.warning(f"⚠️ Model '{model_name}' failed: 404 not found on v1")
-                    last_error = Exception(f"404 {model_name}")
-                    continue
-                if resp.status_code != 200:
-                    err = resp.json().get("error", {}).get("message", resp.text)
-                    logger.warning(f"⚠️ Model '{model_name}' failed: {resp.status_code} {err}")
-                    last_error = Exception(err)
-                    continue
-
-                data = resp.json()
-                text = data["candidates"][0]["content"]["parts"][0]["text"]
-
-                # Strip markdown fences if present
                 if "```json" in text:
                     text = text.split("```json")[1].split("```")[0]
                 elif "```" in text:
                     text = text.split("```")[1].split("```")[0]
-                # Extract JSON object
                 m = re.search(r"\{.*\}", text, re.DOTALL)
                 if m:
                     text = m.group(0)
 
                 result = json.loads(text.strip())
-                logger.info(f"✅ Bundle generated via {model_name} (v1 REST)")
+                logger.info(f"✅ Bundle generated via {model_name}")
                 return result
 
-            except json.JSONDecodeError as e:
-                logger.warning(f"⚠️ Model '{model_name}' returned invalid JSON: {e}")
-                last_error = e
-                continue
             except Exception as e:
                 logger.warning(f"⚠️ Model '{model_name}' failed: {e}")
                 last_error = e
@@ -546,7 +507,7 @@ class GiftBundleService:
         result = None
         try:
             if self.google_api_key and self.genai:
-                result = await self._call_gemini_v1(prompt)
+                result = self._call_gemini(prompt)
         except Exception as e:
             logger.warning(f"⚠️ Gemini failed, using smart fallback: {e}")
 

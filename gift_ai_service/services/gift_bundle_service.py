@@ -1,20 +1,33 @@
 # gift_ai_service/services/gift_bundle_service.py
 """
 Gift Bundle Generation Service
-FIXED: Uses GeminiDirectClient (v1 REST) instead of genai.GenerativeModel.
-       Recipient-aware filtering applied before LLM call and in fallback.
+FIXED: Uses genai library (v1beta) with correct bare 1.5 model names.
+
+Key facts about AI Studio API keys:
+- They ONLY work on the v1beta endpoint (not v1 REST)
+- gemini-2.0-* models have exhausted free-tier quota (limit: 0)
+- gemini-1.5-flash-latest / gemini-1.5-pro-latest → 404 on v1beta
+- CORRECT: "gemini-1.5-flash-8b", "gemini-1.5-flash", "gemini-1.5-pro" (bare names, no suffix)
 """
 
 import os
-import logging
+import re
 import json
+import logging
 from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
+# Model chain — bare 1.5 names that work on v1beta (AI Studio keys)
+GEMINI_MODEL_CHAIN = [
+    "gemini-1.5-flash-8b",  # 1000 RPM free, smallest
+    "gemini-1.5-flash",     # 500 RPM free
+    "gemini-1.5-pro",       # 50 RPM free, most capable
+]
+
 # ── Recipient filtering ────────────────────────────────────────────────────────
 
-MALE_ONLY_KEYWORDS  = ["men's", "mens", "male", "suit", "tie", "necktie", "cufflink", "shaving"]
+MALE_ONLY_KEYWORDS   = ["men's", "mens", "male", "suit", "tie", "necktie", "cufflink", "shaving"]
 FEMALE_ONLY_KEYWORDS = ["women's", "womens", "female", "saree", "kurti", "dupatta", "salwar",
                         "anarkali", "lehenga", "bra", "lipstick", "kanjivaram"]
 
@@ -24,30 +37,28 @@ MALE_RECIPIENTS   = {"dad", "father", "brother", "husband", "boyfriend", "uncle"
 
 def _extract_recipient(text: str) -> str:
     text_lower = text.lower()
-    for key in list(FEMALE_RECIPIENTS) + list(MALE_RECIPIENTS) + ["friend", "colleague", "self", "anyone"]:
+    for key in list(FEMALE_RECIPIENTS) + list(MALE_RECIPIENTS):
         if key in text_lower:
             return key
     return "anyone"
 
 
-def _is_item_appropriate(item: Dict, recipient: str) -> bool:
-    combined = (item.get("title", "") + " " + item.get("description", "")).lower()
-    if recipient in FEMALE_RECIPIENTS:
-        if any(kw in combined for kw in MALE_ONLY_KEYWORDS):
-            logger.info(f"  🚫 Filtered out '{item.get('title')}' — male item for female recipient")
-            return False
-    if recipient in MALE_RECIPIENTS:
-        if any(kw in combined for kw in FEMALE_ONLY_KEYWORDS):
-            logger.info(f"  🚫 Filtered out '{item.get('title')}' — female item for male recipient")
-            return False
-    return True
-
-
 def _filter_items_by_recipient(items: List[Dict], user_intent: str) -> List[Dict]:
     recipient = _extract_recipient(user_intent)
-    if recipient in {"anyone", "friend", "colleague", "self", ""}:
+    if recipient == "anyone":
         return items
-    filtered = [i for i in items if _is_item_appropriate(i, recipient)]
+
+    filtered = []
+    for item in items:
+        combined = (item.get("title", "") + " " + item.get("description", "")).lower()
+        if recipient in FEMALE_RECIPIENTS and any(kw in combined for kw in MALE_ONLY_KEYWORDS):
+            logger.info(f"  🚫 Filtered out '{item.get('title')}' — male item for female recipient")
+            continue
+        if recipient in MALE_RECIPIENTS and any(kw in combined for kw in FEMALE_ONLY_KEYWORDS):
+            logger.info(f"  🚫 Filtered out '{item.get('title')}' — female item for male recipient")
+            continue
+        filtered.append(item)
+
     logger.info(f"🎯 Recipient='{recipient}': {len(items)} items → {len(filtered)} after gender filter")
     return filtered if filtered else items
 
@@ -55,46 +66,78 @@ def _filter_items_by_recipient(items: List[Dict], user_intent: str) -> List[Dict
 # ── Service ────────────────────────────────────────────────────────────────────
 
 class GiftBundleService:
-    """Generates gift bundles using Gemini v1 REST API"""
+    """Generates gift bundles using Gemini via genai library (v1beta)"""
 
     def __init__(self, llm_model: str = None):
         self.preferred_model = llm_model or os.getenv("LLM_MODEL", "gemini-1.5-flash-8b")
         self.google_api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY")
-        self._client = None
+        self.genai = None
 
         if self.google_api_key:
             try:
-                from core.gemini_client import GeminiDirectClient
-                self._client = GeminiDirectClient(api_key=self.google_api_key)
-                logger.info(f"✅ GiftBundleService using Gemini direct v1 REST (preferred: {self.preferred_model})")
+                import google.generativeai as genai
+                genai.configure(api_key=self.google_api_key)
+                self.genai = genai
+                logger.info(f"✅ GiftBundleService initialized (preferred: {self.preferred_model})")
             except Exception as e:
-                logger.warning(f"⚠️ GeminiDirectClient init failed: {e}")
+                logger.warning(f"⚠️ Gemini init failed: {e}")
         else:
             logger.warning("⚠️ No Gemini API key — will use hardcoded fallback")
+
+    def _call_gemini(self, prompt: str) -> Dict:
+        """Try each model in GEMINI_MODEL_CHAIN via genai library (v1beta endpoint)."""
+        if not self.genai:
+            raise Exception("Gemini not initialized")
+
+        # Put preferred model first, then rest of chain
+        chain = [self.preferred_model] + [m for m in GEMINI_MODEL_CHAIN if m != self.preferred_model]
+        last_error = None
+
+        for model_name in chain:
+            try:
+                model = self.genai.GenerativeModel(model_name)
+                response = model.generate_content(
+                    prompt,
+                    generation_config={"max_output_tokens": 2048, "temperature": 0.7},
+                )
+                text = response.text
+
+                if "```json" in text:
+                    text = text.split("```json")[1].split("```")[0]
+                elif "```" in text:
+                    text = text.split("```")[1].split("```")[0]
+                m = re.search(r"\{.*\}", text, re.DOTALL)
+                if m:
+                    text = m.group(0)
+
+                result = json.loads(text.strip())
+                logger.info(f"✅ Bundle generated via {model_name}")
+                return result
+
+            except Exception as e:
+                logger.warning(f"⚠️ Model '{model_name}' failed: {e}")
+                last_error = e
+                continue
+
+        raise Exception(f"All Gemini models failed. Last error: {last_error}")
 
     async def generate_bundles(self, user_intent: str, items: List[Dict]) -> Dict[str, Any]:
         """Generate gift bundles with recipient-aware filtering"""
         logger.info(f"🎨 Generating bundles: '{user_intent}' with {len(items)} items")
 
-        # Filter by recipient BEFORE passing to LLM
         filtered_items = _filter_items_by_recipient(items, user_intent)
 
         from services.gift_prompt_templates import get_gift_bundle_prompt
         prompt = get_gift_bundle_prompt(user_intent, filtered_items)
 
         result = None
-        if self._client:
+        if self.google_api_key and self.genai:
             try:
-                from core.gemini_client import TEXT_MODEL_CHAIN
-                # Put the preferred model first in the chain
-                chain = [self.preferred_model] + [m for m in TEXT_MODEL_CHAIN if m != self.preferred_model]
-                raw = await self._client.generate(prompt, max_tokens=2048, model_chain=chain)
-                result = self._parse_json(raw)
+                result = self._call_gemini(prompt)
             except Exception as e:
-                logger.warning(f"⚠️ Gemini bundle generation failed, using fallback: {e}")
+                logger.warning(f"⚠️ Gemini failed, using fallback: {e}")
 
         if not result:
-            # Hardcoded fallback uses filtered_items (never shows wrong-gender items)
             result = {
                 "bundles": [{
                     "bundle_name": "Curated Selection",
@@ -109,7 +152,6 @@ class GiftBundleService:
         if "bundles" not in result:
             result = {"bundles": []}
 
-        # Attach totals
         for bundle in result["bundles"]:
             if "total_price" not in bundle:
                 bundle["total_price"] = sum(
@@ -117,17 +159,3 @@ class GiftBundleService:
                 )
 
         return {"query": user_intent, "bundles": result["bundles"]}
-
-    @staticmethod
-    def _parse_json(text: str) -> Dict:
-        """Extract JSON object from LLM response text"""
-        clean = text.strip()
-        if "```json" in clean:
-            clean = clean.split("```json")[1].split("```")[0]
-        elif "```" in clean:
-            clean = clean.split("```")[1].split("```")[0]
-        import re
-        match = re.search(r"\{.*\}", clean, re.DOTALL)
-        if match:
-            clean = match.group(0)
-        return json.loads(clean.strip())

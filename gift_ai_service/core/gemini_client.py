@@ -28,7 +28,7 @@ from typing import Optional, List
 logger = logging.getLogger("gift_ai.gemini_client")
 
 # v1 REST endpoint — never v1beta
-GEMINI_V1_BASE = "https://generativelanguage.googleapis.com/v1/models"
+GEMINI_V1_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 # Model preference order for text generation
 # All of these are available on the v1 endpoint

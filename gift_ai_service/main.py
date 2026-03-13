@@ -58,12 +58,13 @@ logger = logging.getLogger("gift_ai.main")
 
 # ========================================================================
 # MODEL FALLBACK CHAIN
-# FIXED: removed hardcoded 'gemini-1.5-flash-001'
+# FIXED: v1-compatible model names (old bare names only worked on deprecated v1beta)
 # ========================================================================
 GEMINI_MODEL_CHAIN = [
-    "gemini-1.5-flash",
-    "gemini-1.5-pro",
-    "gemini-pro",
+    "gemini-2.0-flash",          # newest, fast — recommended default
+    "gemini-2.0-flash-lite",     # lightest option
+    "gemini-1.5-flash-latest",   # stable 1.5, v1-compatible alias
+    "gemini-1.5-pro-latest",     # stable 1.5 pro, v1-compatible alias
 ]
 
 # ========================================================================
@@ -134,12 +135,12 @@ class VisionAIClient:
             try:
                 genai.configure(api_key=self.gemini_api_key)
 
-                # FIXED: model fallback chain
+                # FIXED: v1-compatible model names for vision
                 vision_model_chain = [
-                    "gemini-1.5-flash",
-                    "gemini-1.5-pro",
-                    "gemini-pro-vision",
-                    "gemini-pro",
+                    "gemini-2.0-flash",
+                    "gemini-2.0-flash-lite",
+                    "gemini-1.5-flash-latest",
+                    "gemini-1.5-pro-latest",
                 ]
                 for name in vision_model_chain:
                     try:
@@ -1086,6 +1087,8 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.getenv("PORT", 8001))
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True, log_level="info")
+
+
 
 
 # # gift_ai_service/main.py

@@ -202,8 +202,8 @@ class GiftBundleService:
 
     def __init__(self, llm_model: str = None):
         """Initialize GiftBundleService"""
-        # FIXED: was 'gemini-1.5-flash-001' (404 error) → now 'gemini-1.5-flash'
-        self.llm_model = llm_model or os.getenv('LLM_MODEL', 'gemini-1.5-flash')
+        # FIXED: default to gemini-2.0-flash (v1-compatible)
+        self.llm_model = llm_model or os.getenv('LLM_MODEL', 'gemini-2.0-flash')
         self.google_api_key = os.getenv('GOOGLE_API_KEY')
 
         if self.google_api_key:
@@ -221,11 +221,14 @@ class GiftBundleService:
 
     def _call_gemini(self, prompt: str) -> Dict[str, Any]:
         """Call Gemini API with model fallback chain"""
+        # FIXED: v1-compatible model names. Old bare names (gemini-1.5-flash,
+        # gemini-pro etc.) only worked on the deprecated v1beta endpoint.
         model_chain = [
             self.llm_model,
-            "gemini-1.5-flash",
-            "gemini-1.5-pro",
-            "gemini-pro",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+            "gemini-1.5-flash-latest",
+            "gemini-1.5-pro-latest",
         ]
         # Deduplicate while preserving order
         seen = set()

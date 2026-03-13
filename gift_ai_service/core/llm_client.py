@@ -175,15 +175,11 @@ from typing import Optional
 
 logger = logging.getLogger("gift_ai.llm_client")
 
-# FIXED: v1-compatible model names.
-# Old names (gemini-1.5-flash, gemini-1.5-pro, gemini-pro) only resolve on the
-# deprecated v1beta endpoint — they return 404 on the current v1 API.
-# Use versioned aliases or newer model names instead.
+# NEW
 GEMINI_MODEL_CHAIN = [
-    "gemini-2.0-flash",          # newest, fast — recommended default
-    "gemini-2.0-flash-lite",     # lightest option
-    "gemini-1.5-flash-latest",   # stable 1.5, v1-compatible alias
-    "gemini-1.5-pro-latest",     # stable 1.5 pro, v1-compatible alias
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.5-flash",
 ]
 
 

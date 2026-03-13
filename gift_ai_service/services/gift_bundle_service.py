@@ -18,11 +18,11 @@ from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
-# Model chain — bare 1.5 names that work on v1beta (AI Studio keys)
+# NEW
 GEMINI_MODEL_CHAIN = [
-    "gemini-1.5-flash-8b",  # 1000 RPM free, smallest
-    "gemini-1.5-flash",     # 500 RPM free
-    "gemini-1.5-pro",       # 50 RPM free, most capable
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-2.5-flash",
 ]
 
 # ── Recipient filtering ────────────────────────────────────────────────────────

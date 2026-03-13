@@ -60,15 +60,11 @@ logger = logging.getLogger("gift_ai.main")
 # MODEL FALLBACK CHAIN
 # FIXED: v1-compatible model names (old bare names only worked on deprecated v1beta)
 # ========================================================================
-# MODEL CHAIN — AI Studio keys use v1beta endpoint (not v1).
-# DO NOT use: gemini-2.0-* (quota exhausted on free tier)
-# DO NOT use: -latest suffix (404 on v1beta)
-# DO NOT use: v1 REST endpoint (404 for AI Studio keys — only Vertex AI keys work there)
-# CORRECT: bare 1.5 model names via genai library (which correctly uses v1beta)
+# NEW - currently live on v1beta for AI Studio keys
 GEMINI_MODEL_CHAIN = [
-    "gemini-1.5-flash-8b",   # smallest, 1000 RPM free on v1beta
-    "gemini-1.5-flash",      # 500 RPM free on v1beta
-    "gemini-1.5-pro",        # 50 RPM free on v1beta, most capable
+    "gemini-2.0-flash-lite",   # fastest, lowest cost
+    "gemini-2.0-flash",        # good balance
+    "gemini-2.5-flash",        # most capable, free tier
 ]
 
 # v1beta REST base (AI Studio keys only work here, NOT on /v1/)
@@ -137,10 +133,11 @@ class VisionAIClient:
     no 2.0 models which have exhausted free-tier quota).
     """
 
+    # NEW
     VISION_MODEL_CHAIN = [
-        "gemini-1.5-flash-8b",  # multimodal, 1000 RPM free on v1beta
-        "gemini-1.5-flash",     # multimodal, 500 RPM free on v1beta
-        "gemini-1.5-pro",       # multimodal, 50 RPM free on v1beta
+        "gemini-2.0-flash-lite",
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
     ]
 
     def __init__(self):
